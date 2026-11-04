@@ -25,6 +25,42 @@
 .lightbox-next{right:18px;top:50%;transform:translateY(-50%)}
 @media(max-width:560px){.lightbox{padding:66px 14px 30px}.lightbox-image{max-height:calc(100vh - 190px)}.lightbox-control{width:38px;height:38px;font-size:23px}.lightbox-prev{left:8px;top:auto;bottom:18px;transform:none}.lightbox-next{right:8px;top:auto;bottom:18px;transform:none}.lightbox-close{top:12px;right:12px}}
 [data-lang]{display:none}[data-lang].show{display:initial}.block[data-lang].show{display:block}.inline[data-lang].show{display:inline}.footer .show{display:inline}.section-title{margin-bottom:8px}@media(max-width:820px){.hero{grid-template-columns:1fr;padding:52px 0}.grid{grid-template-columns:1fr 1fr}.flow{grid-template-columns:repeat(2,1fr)}.navlinks{display:none}}@media(max-width:560px){.grid,.shots,.stats{grid-template-columns:1fr}.wide{grid-column:auto}.wrap{width:calc(100% - 28px)}.brand{font-size:13px}.hero p{font-size:16px}}
+
+/* Architecture map */
+.architecture-map{margin-top:26px;padding:24px;border:1px solid #2a4357;border-radius:18px;background:linear-gradient(150deg,#142638 0%,#0d1722 72%);box-shadow:0 20px 55px #0004}
+.arch-source{max-width:520px;margin:0 auto;background:#102f38;border:1px solid #28716e;border-radius:12px;padding:17px 20px;text-align:center}
+.arch-source strong,.arch-node strong{display:block;color:var(--text);font-size:15px}
+.arch-kicker{display:block;margin-bottom:5px;color:var(--cyan);font-size:10px;font-weight:800;letter-spacing:.14em;text-transform:uppercase}
+.arch-source small,.arch-node small,.arch-stage small{display:block;color:var(--muted);font-size:12px;margin-top:5px}
+.arch-down{height:34px;display:grid;place-items:center;color:var(--cyan);font-size:24px;line-height:1}
+.arch-core{display:grid;grid-template-columns:1fr 42px 1fr;align-items:stretch;gap:10px;max-width:900px;margin:0 auto}
+.arch-node{min-height:112px;background:#172536;border:1px solid #2c465a;border-radius:12px;padding:17px;display:flex;flex-direction:column;justify-content:center}
+.arch-node strong{font-size:15px}
+.arch-node .filetag{display:inline-block;align-self:flex-start;margin-top:10px;padding:3px 7px;border:1px solid #365269;border-radius:5px;color:#b9d7e6;font:11px/1.4 ui-monospace,SFMono-Regular,Consolas,monospace;overflow-wrap:anywhere}
+.arch-arrow{display:grid;place-items:center;color:var(--cyan);font-size:26px}
+.arch-event{max-width:600px;margin:0 auto;background:#183b37;border:1px solid #2d776b;border-radius:12px;padding:15px;text-align:center}
+.arch-event strong{display:block;color:#b8eee2}
+.arch-branches{display:grid;grid-template-columns:.82fr 1.7fr;gap:14px;margin-top:18px;align-items:stretch}
+.arch-branch{background:#0e1925;border:1px solid var(--line);border-radius:13px;padding:17px;min-width:0}
+.arch-branch h3{font-size:15px;margin:0 0 5px}
+.arch-branch>p{color:var(--muted);font-size:13px;margin:0 0 13px}
+.arch-storage{background:#29243a;border-color:#55476f}
+.arch-notify{border-color:#42606b}
+.arch-notify-flow{display:grid;grid-template-columns:1fr 22px 1fr 22px 1fr;gap:6px;align-items:center}
+.arch-stage{min-width:0;min-height:104px;padding:12px 9px;border-radius:9px;background:#152333;border:1px solid #31485b;text-align:center;display:flex;flex-direction:column;justify-content:center}
+.arch-stage strong{font-size:12px;line-height:1.35}
+.arch-stage small{font-size:11px;overflow-wrap:anywhere}
+.arch-stage .filetag{font:10px/1.4 ui-monospace,SFMono-Regular,Consolas,monospace;color:#b9d7e6;overflow-wrap:anywhere;margin-top:7px}
+.arch-mini-arrow{color:var(--cyan);font-size:19px;text-align:center}
+.arch-endpoint{margin-top:12px;padding:10px 12px;border:1px solid #28716e;border-radius:8px;background:#102f38;text-align:center;color:#b8eee2;font-size:13px}
+.arch-ui-row{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:14px}
+.arch-ui-card{padding:16px;border:1px solid var(--line);border-radius:12px;background:#121e2b}
+.arch-ui-card strong{display:block;font-size:14px}
+.arch-ui-card p{font-size:13px;color:var(--muted);margin:6px 0 0}
+.arch-support{margin-top:14px;padding:13px 16px;border:1px dashed #3c596e;border-radius:10px;color:var(--muted);font-size:13px}
+.arch-support b{color:var(--cyan)}
+@media(max-width:760px){.architecture-map{padding:15px}.arch-core{grid-template-columns:1fr;gap:7px}.arch-arrow{transform:rotate(90deg);height:25px}.arch-branches{grid-template-columns:1fr}.arch-notify-flow{grid-template-columns:1fr}.arch-mini-arrow{transform:rotate(90deg);height:20px}.arch-ui-row{grid-template-columns:1fr}}
+
 </style>
 </head>
 <body><div class="wrap">
@@ -40,7 +76,41 @@
 <article class="card"><span class="num">04 / TELEGRAM</span><h3><span data-lang="ru" class="show">Визуальные карточки</span><span data-lang="en">Visual event cards</span></h3><p><span data-lang="ru" class="show">Отдельные уведомления о приближении к уровню и подтверждённой реакции, сформированные на основе закрытых свечей Binance.</span><span data-lang="en">Separate cards for level approach and confirmed reaction, based on closed Binance Futures candles.</span></p></article>
 <article class="card"><span class="num">05 / STORAGE</span><h3><span data-lang="ru" class="show">Локальная история</span><span data-lang="en">Local event history</span></h3><p><span data-lang="ru" class="show">Сохранение событий и структур данных для виртуального тестирования в SQLite. Реальные ордера не отправляются.</span><span data-lang="en">SQLite persistence for recorded events and virtual-testing data structures. No live orders are sent.</span></p></article>
 <article class="card"><span class="num">06 / QUALITY</span><h3><span data-lang="ru" class="show">Автоматические тесты</span><span data-lang="en">Automated tests</span></h3><p><span data-lang="ru" class="show">Набор из 23 unit-тестов для правил сканера, хранения, генерации карточек, очереди уведомлений и бэктест-логики.</span><span data-lang="en">A suite of 23 unit tests for scanner rules, storage, card generation, notification queue and backtest logic.</span></p></article></div></section>
-<section id="architecture"><div class="eyebrow"><span data-lang="ru" class="show">УСТРОЙСТВО СИСТЕМЫ</span><span data-lang="en">SYSTEM DESIGN</span></div><h2><span data-lang="ru" class="show">Разделение ответственности</span><span data-lang="en">Separated responsibilities</span></h2><p class="lead"><span data-lang="ru" class="show">Сканер и мост доставки сообщений в Telegram работают как отдельные процессы. Это позволяет независимо настраивать маршрутизацию уведомлений.</span><span data-lang="en">The scanner and Telegram delivery bridge run as separate processes, allowing notification routing to be configured independently.</span></p><div class="flow"><div class="node"><b>01</b>Binance REST<br>+ WebSocket</div><div class="node"><b>02</b><span data-lang="ru" class="show">Рыночные данные<br>и сканер</span><span data-lang="en">Market data<br>+ scanner</span></div><div class="node"><b>03</b>SQLite<br>+ renderer</div><div class="node"><b>04</b><span data-lang="ru" class="show">Локальная очередь<br>JSON-события</span><span data-lang="en">Local queue<br>JSON events</span></div><div class="node"><b>05</b>Telegram<br>Bridge</div></div><div class="note"><span data-lang="ru" class="show">Сканер не размещает ордера на бирже. Подтверждённая реакция является классификацией по заданным правилам, а не прогнозом обязательного разворота цены.</span><span data-lang="en">The scanner does not place exchange orders. A confirmed reaction is a rule-based classification, not a prediction that price must reverse.</span></div></section>
+<section id="architecture">
+<div class="eyebrow"><span data-lang="ru" class="show">УСТРОЙСТВО СИСТЕМЫ</span><span data-lang="en">SYSTEM DESIGN</span></div>
+<h2><span data-lang="ru" class="show">Как устроен Crypto Setup Analyzer</span><span data-lang="en">How Crypto Setup Analyzer is structured</span></h2>
+<p class="lead"><span data-lang="ru" class="show">Система разделена на получение рыночных данных, обнаружение событий, локальное хранение и отдельную доставку уведомлений. Ниже показаны основные компоненты и путь события от Binance до Telegram.</span><span data-lang="en">The system separates market-data access, event detection, local persistence and notification delivery. The diagram follows an event from Binance through the application to Telegram.</span></p>
+<div class="architecture-map">
+  <div class="arch-source"><span class="arch-kicker"><span data-lang="ru" class="show">ВНЕШНИЙ ИСТОЧНИК</span><span data-lang="en">EXTERNAL SOURCE</span></span><strong>Binance USDⓈ-M Futures</strong><small>REST API · WebSocket · USDT-M altcoin contracts</small></div>
+  <div class="arch-down" aria-hidden="true">↓</div>
+  <div class="arch-core">
+    <div class="arch-node"><span class="arch-kicker"><span data-lang="ru" class="show">СЛОЙ ДАННЫХ</span><span data-lang="en">DATA LAYER</span></span><strong><span data-lang="ru" class="show">Адаптеры рыночных данных</span><span data-lang="en">Market-data adapters</span></strong><small><span data-lang="ru" class="show">Получение и передача данных REST / WebSocket</span><span data-lang="en">Fetch and deliver REST / WebSocket data</span></small><span class="filetag">crypto_setup_analyzer/market_data.py</span><span class="filetag">services/market_data_service.py</span></div>
+    <div class="arch-arrow" aria-hidden="true">→</div>
+    <div class="arch-node"><span class="arch-kicker"><span data-lang="ru" class="show">АНАЛИТИЧЕСКИЙ СЛОЙ</span><span data-lang="en">ANALYSIS LAYER</span></span><strong><span data-lang="ru" class="show">Сканер реакций</span><span data-lang="en">Rebound scanner</span></strong><small><span data-lang="ru" class="show">Символы, цены, уровни и условия реакции</span><span data-lang="en">Symbols, prices, levels and reaction conditions</span></small><span class="filetag">crypto_setup_analyzer/rebound_scanner.py</span></div>
+  </div>
+  <div class="arch-down" aria-hidden="true">↓</div>
+  <div class="arch-event"><span class="arch-kicker"><span data-lang="ru" class="show">РЕЗУЛЬТАТ АНАЛИЗА</span><span data-lang="en">ANALYSIS OUTPUT</span></span><strong><span data-lang="ru" class="show">Событие: приближение к уровню или подтверждённая реакция</span><span data-lang="en">Event: level approach or confirmed reaction</span></strong></div>
+  <div class="arch-branches">
+    <div class="arch-branch arch-storage"><span class="arch-kicker"><span data-lang="ru" class="show">ВЕТКА ХРАНЕНИЯ</span><span data-lang="en">PERSISTENCE PATH</span></span><h3>SQLite</h3><p><span data-lang="ru" class="show">Локальная история событий и данные виртуальных сделок.</span><span data-lang="en">Local event history and virtual-trade data.</span></p><span class="filetag">infrastructure/storage.py</span></div>
+    <div class="arch-branch arch-notify"><span class="arch-kicker"><span data-lang="ru" class="show">ВЕТКА УВЕДОМЛЕНИЙ</span><span data-lang="en">NOTIFICATION PATH</span></span><h3><span data-lang="ru" class="show">От события до Telegram</span><span data-lang="en">From event to Telegram</span></h3><p><span data-lang="ru" class="show">Подготовка графической карточки и доставка выполняются последовательно, через локальную очередь.</span><span data-lang="en">A visual event card is prepared and delivered through a local queue.</span></p>
+      <div class="arch-notify-flow">
+        <div class="arch-stage"><strong><span data-lang="ru" class="show">Уведомитель и рендерер</span><span data-lang="en">Notifier + renderer</span></strong><small><span data-lang="ru" class="show">Закрытые 1m klines · проверка OHLC · карточка</span><span data-lang="en">Closed 1m klines · OHLC validation · card</span></small><span class="filetag">telegram_notifier.py<br>signal_card.py</span></div>
+        <div class="arch-mini-arrow" aria-hidden="true">→</div>
+        <div class="arch-stage"><strong><span data-lang="ru" class="show">Локальная очередь</span><span data-lang="en">Local queue</span></strong><small>JSON jobs</small><span class="filetag">telegram_queue/</span></div>
+        <div class="arch-mini-arrow" aria-hidden="true">→</div>
+        <div class="arch-stage"><strong><span data-lang="ru" class="show">Отдельный процесс Bridge</span><span data-lang="en">Separate Bridge process</span></strong><small><span data-lang="ru" class="show">Читает очередь и отправляет сообщения</span><span data-lang="en">Reads queued jobs and sends messages</span></small><span class="filetag">telegram_bridge/bridge.py</span></div>
+      </div>
+      <div class="arch-endpoint">Telegram Bot API → <span data-lang="ru" class="show">настроенный канал</span><span data-lang="en">configured channel</span></div>
+    </div>
+  </div>
+  <div class="arch-ui-row">
+    <div class="arch-ui-card"><span class="arch-kicker"><span data-lang="ru" class="show">ПОЛЬЗОВАТЕЛЬСКИЙ СЛОЙ</span><span data-lang="en">USER INTERFACE</span></span><strong><span data-lang="ru" class="show">Настольное приложение</span><span data-lang="en">Desktop application</span></strong><p><span data-lang="ru" class="show">Точка запуска <code>app.py</code>; окна и взаимодействие с пользователем находятся в <code>ui/</code>.</span><span data-lang="en">Launched from <code>app.py</code>; windows and user interaction are implemented in <code>ui/</code>.</span></p></div>
+    <div class="arch-ui-card"><span class="arch-kicker"><span data-lang="ru" class="show">СТРУКТУРЫ ДАННЫХ</span><span data-lang="en">DATA MODELS</span></span><strong>Models</strong><p><span data-lang="ru" class="show">Пакет <code>models/</code> содержит модели событий и виртуальных сделок, используемые приложением.</span><span data-lang="en">The <code>models/</code> package contains signal and virtual-trade data models used by the application.</span></p></div>
+  </div>
+  <div class="arch-support"><b><span data-lang="ru" class="show">Проверки:</span><span data-lang="en">Tests:</span></b> <span data-lang="ru" class="show">папка <code>tests/</code> покрывает ключевые правила и локальные интеграции. Автотесты не доказывают прибыльность стратегии и не заменяют проверку GUI, биржевого соединения или доставки Telegram в конкретной сети.</span><span data-lang="en">the <code>tests/</code> suite covers key logic and local integrations. Automated tests do not prove strategy profitability or replace GUI, exchange-connection or Telegram-delivery checks in a specific network environment.</span></div>
+</div>
+<div class="note"><span data-lang="ru" class="show">Важное разделение: сканер формирует события, а отдельный Bridge отвечает за отправку в Telegram. Это позволяет независимо настраивать сетевой маршрут уведомлений, не смешивая его с получением рыночных данных.</span><span data-lang="en">Key separation: the scanner creates events, while a separate Bridge delivers them to Telegram. Notification network routing can therefore be configured independently from market-data access.</span></div>
+</section>
 <section id="screenshots"><div class="eyebrow"><span data-lang="ru" class="show">ПРЕДПРОСМОТР</span><span data-lang="en">PRODUCT PREVIEW</span></div><h2><span data-lang="ru" class="show">Crypto Setup Analyzer RU 2.0 в работе</span><span data-lang="en">Crypto Setup Analyzer RU 2.0 in action</span></h2><p class="lead"><span data-lang="ru" class="show">Реальные скриншоты приложения, сканера и карточек Telegram.</span><span data-lang="en">Authentic screenshots of the running application, scanner and Telegram event cards.</span></p><div class="shots">
 <figure class="shot-img wide"><button class="shot-open" type="button" aria-label="Открыть скриншот / Open screenshot"><img src="screenshots/01-main-window.png" alt="Главное окно Crypto Setup Analyzer RU 2.0"></button><figcaption><strong><span data-lang="ru" class="show">01 · Главное окно анализатора</span><span data-lang="en">01 · Main analyzer</span></strong><span data-lang="ru" class="show">График, ключевые уровни, структура движения и профиль объёма.</span><span data-lang="en">Chart, key levels, market structure and volume profile.</span></figcaption></figure>
 <figure class="shot-img wide"><button class="shot-open" type="button" aria-label="Открыть скриншот / Open screenshot"><img src="screenshots/02-rebound-scanner.png" alt="Сканер отскоков альткоинов"></button><figcaption><strong><span data-lang="ru" class="show">02 · Сканер альткоинов</span><span data-lang="en">02 · Altcoin rebound scanner</span></strong><span data-lang="ru" class="show">Binance Futures USDT-M, расстояние до уровней и текущая динамика.</span><span data-lang="en">Binance Futures USDT-M, distance to levels and current movement.</span></figcaption></figure>
