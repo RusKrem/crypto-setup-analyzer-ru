@@ -1,0 +1,16 @@
+# Crypto Setup Analyzer RU v1.27: Telegram Bridge (Reversal Lab v51 style)
+
+The scanner writes messages to `telegram_queue` as JSON files and does not contact Telegram over the network. The separate `telegram_bridge\\TelegramBridge.exe` sends them through the route assigned to that EXE in hide.me.
+
+## Setup
+1. Copy `.env.example` to `.env` in the project root.
+2. Set `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHANNEL` (for example `@your_channel`). Add the bot as an administrator with permission to post in the channel.
+3. Run `telegram_bridge\\BUILD_TELEGRAM_BRIDGE.bat` once. It creates a dedicated venv and builds a standalone EXE.
+4. Add only `telegram_bridge\\TelegramBridge.exe` to hide.me VPN routing. Keep the scanner outside the VPN.
+5. Run `telegram_bridge\\start_bridge.bat`, check `telegram_bridge_log.txt` for `[NETWORK] TELEGRAM API OK bot=@...`, then run `START.bat`.
+
+## Queue and expiration
+Messages are written into `telegram_queue`. Files are removed only after Telegram confirms successful delivery. Failed sends are retried. `LEVEL_APPROACH` alerts expire after 300 seconds; stale level alerts are discarded. Other message types have no TTL unless set by the caller.
+
+## Diagnostics
+Log: `telegram_bridge_log.txt` in the project root. DNS, TCP/443 and Bot API `getMe` are checked separately. This package has not been tested against your hide.me installation; confirm the API OK line and a real channel post.

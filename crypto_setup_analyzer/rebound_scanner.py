@@ -1,0 +1,398 @@
+"""Сканер приближения цены к ключевым уровням Binance Futures USDT-M."""
+from __future__ import annotations
+import time
+import threading
+from datetime import datetime, timezone
+import requests
+import json
+import websocket
+
+BASE_URL = "https://fapi.binance.com"
+TOP_ALTCOINS_COUNT = 30
+MIN_QUOTE_VOLUME_USDT = 2_000_000
+ALERT_DISTANCE_PCT = 0.5
+EXCLUDED_BASES = {
+    "BTC", "ETH", "BNB", "SOL", "XRP", "USDC", "FDUSD", "TUSD", "USDP", "DAI",
+    "EUR", "TRY", "BRL", "GBP", "AUD", "UST", "USTC", "PAXG", "WBTC", "WBETH",
+    "USDE", "USDS", "USD1", "RLUSD", "PYUSD", "EURC", "USDD", "BUSD"
+}
+
+
+def list_altcoin_symbols(session: requests.Session, limit: int = TOP_ALTCOINS_COUNT,
+                         min_quote_volume: float = MIN_QUOTE_VOLUME_USDT) -> list[str]:
+    """Выбирает ликвидные бессрочные USDT-M фьючерсы, исключая основные монеты и стейблкоины."""
+    info = session.get(f"{BASE_URL}/fapi/v1/exchangeInfo", timeout=20)
+    info.raise_for_status()
+    allowed = set()
+    for item in info.json().get("symbols", []):
+        base, symbol = item.get("baseAsset", ""), item.get("symbol", "")
+        if (item.get("status") == "TRADING" and item.get("quoteAsset") == "USDT"
+                and item.get("contractType") == "PERPETUAL" and base not in EXCLUDED_BASES
+                and not any(tag in base for tag in ("UP", "DOWN", "BULL", "BEAR"))):
+            allowed.add(symbol)
+    tickers = session.get(f"{BASE_URL}/fapi/v1/ticker/24hr", timeout=20)
+    tickers.raise_for_status()
+    ranked = []
+    for item in tickers.json():
+        if item.get("symbol") not in allowed:
+            continue
+        try:
+            volume = float(item.get("quoteVolume", 0))
+        except (TypeError, ValueError):
+            continue
+        if volume >= min_quote_volume:
+            ranked.append((item["symbol"], volume))
+    ranked.sort(key=lambda row: row[1], reverse=True)
+    return [symbol for symbol, _ in ranked[:max(1, int(limit))]]
+
+
+def fetch_klines(session, symbol: str, interval: str, limit: int):
+    response = session.get(f"{BASE_URL}/fapi/v1/klines",
+                           params={"symbol": symbol, "interval": interval, "limit": limit}, timeout=12)
+    response.raise_for_status()
+    return response.json()
+
+
+def _levels(session, symbol):
+    """Возвращает только шесть уровней: high/low предыдущей недели, предыдущего и текущего дня."""
+    daily = fetch_klines(session, symbol, "1d", 16)
+    now = datetime.now(timezone.utc)
+    levels = []
+
+    # Binance возвращает дневную свечу текущего дня последней; она используется только для диапазона сегодня.
+    if len(daily) >= 2:
+        previous_day = daily[-2]
+        levels.extend([
+            ("PDH", float(previous_day[2]), "Предыдущий день"),
+            ("PDL", float(previous_day[3]), "Предыдущий день"),
+        ])
+
+    # Берём только полностью завершённые дневные свечи предыдущей календарной недели UTC.
+    # Не используем текущую неделю, чтобы недельные уровни не двигались внутри недели.
+    completed_days = daily[:-1]
+    previous_week_days = []
+    for candle in completed_days:
+        candle_date = datetime.fromtimestamp(int(candle[0]) / 1000, timezone.utc).date()
+        days_since_monday = candle_date.weekday()
+        week_start = candle_date.fromordinal(candle_date.toordinal() - days_since_monday)
+        current_week_start = now.date().fromordinal(now.date().toordinal() - now.weekday())
+        if week_start < current_week_start and (current_week_start - week_start).days == 7:
+            previous_week_days.append(candle)
+    if previous_week_days:
+        levels.extend([
+            ("PWH", max(float(c[2]) for c in previous_week_days), "Предыдущая неделя"),
+            ("PWL", min(float(c[3]) for c in previous_week_days), "Предыдущая неделя"),
+        ])
+
+    current_day_candles = []
+    for candle in daily:
+        candle_date = datetime.fromtimestamp(int(candle[0]) / 1000, timezone.utc).date()
+        if candle_date == now.date():
+            current_day_candles.append(candle)
+    if current_day_candles:
+        levels.extend([
+            ("Today High", max(float(c[2]) for c in current_day_candles), "Текущий день"),
+            ("Today Low", min(float(c[3]) for c in current_day_candles), "Текущий день"),
+        ])
+
+    # Удаляем дубликаты только при практически одинаковой цене, сохраняя названия всех шести уровней
+    # в случаях, когда уровни совпадают по цене: тип уровня важен для анализа.
+    return [(name, price, group) for name, price, group in levels if price > 0]
+
+
+def scan_symbol(session, symbol: str, current_price: float | None = None):
+    """Выдаёт только предупреждение о приближении в пределах 0,5%, без сигналов входа."""
+    if current_price is None:
+        response = session.get(f"{BASE_URL}/fapi/v1/ticker/price", params={"symbol": symbol}, timeout=8)
+        response.raise_for_status()
+        current_price = float(response.json()["price"])
+    alerts = []
+    for name, level, group in _levels(session, symbol):
+        distance = abs(current_price-level)/level*100
+        # Только приближение: цена должна ещё не пересечь уровень.
+        if 0 < distance <= ALERT_DISTANCE_PCT:
+            alerts.append({"symbol": symbol, "level_name": name, "level_group": group,
+                           "level": level, "price": current_price, "distance_pct": distance,
+                           "time": int(time.time()*1000),
+                           "details": f"Цена в {distance:.3f}% от уровня; касание ещё не подтверждено"})
+    return sorted(alerts, key=lambda x: x["distance_pct"])
+
+
+class ReboundScanner:
+    """Фоновый радар уровней: цены получает через WebSocket, уровни через REST."""
+    WS_URL = "wss://fstream.binance.com/ws/!ticker@arr"
+
+    def __init__(self, on_status, on_signal, on_symbols=None, on_trade_update=None,
+                 on_price_update=None, on_confirmation=None, batch_size=30, interval_seconds=3, alert_distance_pct=ALERT_DISTANCE_PCT,
+                 symbol_refresh_seconds=900, levels_refresh_seconds=60):
+        self.on_status = on_status
+        self.on_signal = on_signal
+        self.on_symbols = on_symbols or (lambda count: None)
+        self.on_price_update = on_price_update or (lambda update: None)
+        self.on_confirmation = on_confirmation or (lambda update: None)
+        self.batch_size = max(1, int(batch_size))
+        self.interval_seconds = max(1, int(interval_seconds))
+        self.symbol_refresh_seconds = max(60, int(symbol_refresh_seconds))
+        self.levels_refresh_seconds = max(15, int(levels_refresh_seconds))
+        self.alert_distance_pct = float(alert_distance_pct)
+        self._stop = threading.Event()
+        self._thread = None
+        self._ws_thread = None
+        self._confirmation_thread = None
+        self._last_confirmed_candle = {}
+        self._confirmed_alerts = set()
+        self._approach_started = {}
+        self._chart_candles = {}
+        self._ws_app = None
+        self._symbols = []
+        self._active_alerts = set()
+        self._last_refresh = 0
+        self._levels_cache = {}
+        self._levels_cache_time = {}
+        self._lock = threading.RLock()
+
+    @property
+    def running(self):
+        return self._thread is not None and self._thread.is_alive()
+
+    def start(self):
+        if not self.running:
+            self._stop.clear()
+            self._thread = threading.Thread(target=self._run, daemon=True)
+            self._ws_thread = threading.Thread(target=self._ws_loop, daemon=True)
+            self._confirmation_thread = threading.Thread(target=self._confirmation_loop, daemon=True)
+            self._thread.start()
+            self._ws_thread.start()
+            self._confirmation_thread.start()
+
+    def stop(self):
+        self._stop.set()
+        app = self._ws_app
+        if app is not None:
+            try:
+                app.close()
+            except Exception:
+                pass
+
+    def _run(self):
+        """Обновляет список монет и уровни; частые цены сюда не запрашиваются."""
+        last_price_refresh = 0.0
+        with requests.Session() as session:
+            while not self._stop.is_set():
+                try:
+                    now = time.time()
+                    if not self._symbols or now - self._last_refresh >= self.symbol_refresh_seconds:
+                        symbols = list_altcoin_symbols(session, limit=self.batch_size)
+                        with self._lock:
+                            self._symbols = symbols
+                            self._last_refresh = now
+                            # При смене списка оставляем кэш только для отслеживаемых монет.
+                            self._levels_cache = {s: v for s, v in self._levels_cache.items() if s in symbols}
+                            self._levels_cache_time = {s: v for s, v in self._levels_cache_time.items() if s in symbols}
+                            self._active_alerts = {k for k in self._active_alerts if k[0] in symbols}
+                        self.on_symbols(len(symbols))
+                    with self._lock:
+                        symbols = list(self._symbols)
+                    if not symbols:
+                        raise RuntimeError("Binance Futures не вернула подходящие альткоины USDT-M.")
+                    # Обновляем только уровни по REST, а цены приходят отдельным WebSocket-потоком.
+                    for symbol in symbols:
+                        if self._stop.is_set():
+                            break
+                        now = time.time()
+                        if (symbol not in self._levels_cache or
+                                now - self._levels_cache_time.get(symbol, 0) >= self.levels_refresh_seconds):
+                            try:
+                                levels = _levels(session, symbol)
+                                with self._lock:
+                                    self._levels_cache[symbol] = levels
+                                    self._levels_cache_time[symbol] = now
+                            except Exception as exc:
+                                self.on_status(f"Не удалось обновить уровни {symbol}: {str(exc)[:80]}")
+                    # Резервная загрузка цен через REST. Она также создаёт первые строки
+                    # таблицы, даже если WebSocket ещё не подключился или недоступен.
+                    now = time.time()
+                    if now - last_price_refresh >= 10:
+                        try:
+                            response = session.get(f"{BASE_URL}/fapi/v1/ticker/price", timeout=12)
+                            response.raise_for_status()
+                            ticker_prices = response.json()
+                            prices = {
+                                item.get("symbol"): float(item.get("price", 0))
+                                for item in ticker_prices
+                                if item.get("symbol") in symbols
+                            }
+                            updated = 0
+                            for symbol, price in prices.items():
+                                if price > 0:
+                                    self._handle_price(symbol, price)
+                                    updated += 1
+                            last_price_refresh = now
+                            self.on_status(
+                                f"Binance Futures USDT-M · {len(symbols)} альткоинов · "
+                                f"цены REST + WebSocket · получено цен: {updated} · "
+                                f"порог {self.alert_distance_pct:.2f}%"
+                            )
+                        except Exception as exc:
+                            self.on_status(
+                                f"Резервное получение цен Binance: {str(exc)[:100]}"
+                            )
+                    else:
+                        self.on_status(
+                            f"Binance Futures USDT-M · {len(symbols)} альткоинов · "
+                            f"REST + WebSocket · порог {self.alert_distance_pct:.2f}%"
+                        )
+                except Exception as exc:
+                    self.on_status(f"Ошибка подготовки сканера: {str(exc)[:140]}")
+                self._stop.wait(2)
+
+    def _handle_price(self, symbol, price):
+        """Обрабатывает новое событие цены от Binance WebSocket."""
+        with self._lock:
+            if symbol not in self._symbols:
+                return
+            levels = list(self._levels_cache.get(symbol, []))
+        if not levels or price <= 0:
+            return
+        now = time.time()
+        active_now = set()
+        for name, level, group in levels:
+            if level <= 0:
+                continue
+            distance = abs(price - level) / level * 100
+            in_zone = 0 < distance <= self.alert_distance_pct
+            update = {"symbol": symbol, "level_name": name, "level_group": group,
+                      "level": level, "price": price, "distance_pct": distance,
+                      "time": int(now * 1000), "in_zone": in_zone}
+            self.on_price_update(update)
+            alert_key = (symbol, name, round(level, 8))
+            with self._lock:
+                was_active = alert_key in self._active_alerts
+                is_new = False
+                if was_active and distance <= 0.7:
+                    active_now.add(alert_key)
+                elif in_zone and not was_active:
+                    self._active_alerts.add(alert_key)
+                    self._approach_started[alert_key] = now
+                    self._confirmed_alerts.discard(alert_key)
+                    active_now.add(alert_key)
+                    is_new = True
+                else:
+                    is_new = False
+            if in_zone and is_new:
+                with self._lock:
+                    candles = list(self._chart_candles.get(symbol, []))
+                self.on_signal({**update, "candles": candles,
+                    "details": f"Цена в {distance:.3f}% от уровня; касание ещё не подтверждено"})
+        # Сбрасываем блокировку только после удаления дальше 0,7%.
+        with self._lock:
+            expired = {k for k in self._active_alerts if k[0] == symbol and k not in active_now}
+            self._active_alerts.difference_update(expired)
+
+    @staticmethod
+    def evaluate_rejection(candle, level, direction):
+        """Проверяет выраженное отвержение закрытой свечой; возвращает метрики или None."""
+        o, h, low, close = map(float, (candle[1], candle[2], candle[3], candle[4]))
+        span = h - low
+        if span <= 0:
+            return None
+        body = abs(close - o)
+        body = max(body, span * 0.001)
+        upper_wick = h - max(o, close)
+        lower_wick = min(o, close) - low
+        close_position = (close - low) / span
+        if direction == "SHORT":
+            touched = h >= level
+            ratio = upper_wick / body
+            valid = touched and close < level and ratio >= 1.5 and close_position <= 0.35
+        else:
+            touched = low <= level
+            ratio = lower_wick / body
+            valid = touched and close > level and ratio >= 1.5 and close_position >= 0.65
+        if not valid:
+            return None
+        return {"wick_body_ratio": ratio, "close_position": close_position,
+                "candle_open": o, "candle_high": h, "candle_low": low, "candle_close": close}
+
+    def _confirmation_loop(self):
+        """Проверяет только завершённые 1m-свечи и публикует подтверждённые реакции."""
+        with requests.Session() as session:
+            while not self._stop.is_set():
+                with self._lock:
+                    symbols = list(self._symbols)
+                    levels_by_symbol = {k: list(v) for k, v in self._levels_cache.items()}
+                for symbol in symbols:
+                    if self._stop.is_set():
+                        break
+                    try:
+                        candles = fetch_klines(session, symbol, "1m", 80)
+                        if len(candles) < 3:
+                            continue
+                        with self._lock:
+                            self._chart_candles[symbol] = list(candles[:-1])
+                        closed = candles[-2]
+                        close_time = int(closed[6])
+                        for name, level, group in levels_by_symbol.get(symbol, []):
+                            direction = "LONG" if name in ("PDL", "PWL", "Today Low") else "SHORT"
+                            key = (symbol, name, round(level, 8))
+                            if self._last_confirmed_candle.get(key) == close_time:
+                                continue
+                            self._last_confirmed_candle[key] = close_time
+                            metrics = self.evaluate_rejection(closed, level, direction)
+                            if not metrics:
+                                continue
+                            with self._lock:
+                                started = self._approach_started.get(key)
+                                if key in self._confirmed_alerts or started is None or time.time() - started > 300:
+                                    continue
+                                self._confirmed_alerts.add(key)
+                            close = float(closed[4])
+                            distance = abs(close - level) / level * 100 if level else 0
+                            event = {"symbol": symbol, "level_name": name, "level_group": group,
+                                "level": level, "price": close, "distance_pct": distance,
+                                "time": close_time, "candle_open_time": int(closed[0]),
+                                "direction": direction, "candles": candles[:-1],
+                                "details": "Выраженное отвержение уровня на закрытой минутной свече", **metrics}
+                            self.on_confirmation(event)
+                    except Exception as exc:
+                        self.on_status(f"Проверка реакции {symbol}: {str(exc)[:90]}")
+                self._stop.wait(12)
+
+    def _ws_loop(self):
+        """Подключается к общему потоку котировок Binance USDⓈ-M Futures."""
+        while not self._stop.is_set():
+            try:
+                def on_message(_ws, message):
+                    try:
+                        payload = json.loads(message)
+                        if isinstance(payload, dict):
+                            payload = [payload]
+                        with self._lock:
+                            tracked = set(self._symbols)
+                        for item in payload:
+                            symbol = item.get("s")
+                            if symbol in tracked:
+                                # Поле c в !ticker@arr содержит последнюю цену.
+                                self._handle_price(symbol, float(item.get("c", 0)))
+                    except Exception as exc:
+                        self.on_status(f"Ошибка обработки WebSocket: {str(exc)[:100]}")
+
+                def on_error(_ws, error):
+                    if not self._stop.is_set():
+                        self.on_status(f"WebSocket Binance: {str(error)[:100]}")
+
+                def on_open(_ws):
+                    self.on_status("WebSocket Binance подключён · получаем поток цен")
+
+                self._ws_app = websocket.WebSocketApp(
+                    self.WS_URL, on_message=on_message, on_error=on_error, on_open=on_open
+                )
+                self._ws_app.run_forever(ping_interval=150, ping_timeout=20)
+            except Exception as exc:
+                if not self._stop.is_set():
+                    self.on_status(f"Не удалось подключить WebSocket: {str(exc)[:100]}")
+            finally:
+                self._ws_app = None
+            if not self._stop.is_set():
+                self.on_status("WebSocket отключён. Повторное подключение через 5 секунд…")
+                self._stop.wait(5)
