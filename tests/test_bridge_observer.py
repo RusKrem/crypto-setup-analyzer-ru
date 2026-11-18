@@ -101,6 +101,43 @@ class BridgeObserverIntegrationTests(unittest.TestCase):
             self.assertIn("[TELEGRAM SENT]", log_text)
             self.assertNotIn("[TELEGRAM RETRY]", log_text)
 
+    def test_expired_queue_item_removes_its_card_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            queue = base / "telegram_queue"
+            queue.mkdir()
+            photo = queue / "expired.png"
+            photo.write_bytes(b"png")
+            message = queue / "expired.json"
+            message.write_text(json.dumps({
+                "id": "expired-photo", "created_ts": 1000, "ttl_seconds": 10,
+                "kind": "LEVEL_APPROACH", "text": "expired", "photo_path": str(photo),
+            }), encoding="utf-8")
+            with patch.object(bridge, "BASE_DIR", str(base)), \
+                 patch.object(bridge, "QUEUE_DIR", str(queue)), \
+                 patch.object(bridge, "LOG_FILE", str(base / "bridge.log")), \
+                 patch.object(bridge.time, "time", return_value=2000.0), \
+                 patch.object(bridge.urllib.request, "urlopen") as telegram_mock:
+                bridge.process_file(str(message), "123:token", "@test_channel")
+            self.assertFalse(message.exists())
+            self.assertFalse(photo.exists())
+            telegram_mock.assert_not_called()
+
+    def test_corrupt_queue_json_is_quarantined_for_inspection(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            queue = base / "telegram_queue"
+            queue.mkdir()
+            message = queue / "broken.json"
+            message.write_text('{"id": "broken", invalid json', encoding="utf-8")
+            with patch.object(bridge, "QUEUE_DIR", str(queue)), \
+                 patch.object(bridge, "LOG_FILE", str(base / "bridge.log")):
+                bridge.process_file(str(message), "123:token", "@test_channel")
+            self.assertFalse(message.exists())
+            quarantined = list((queue / "failed").glob("broken.json"))
+            self.assertEqual(len(quarantined), 1)
+            self.assertIn("invalid json", quarantined[0].read_text(encoding="utf-8"))
+
     def test_photo_symlink_outside_queue_is_rejected(self):
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp)
