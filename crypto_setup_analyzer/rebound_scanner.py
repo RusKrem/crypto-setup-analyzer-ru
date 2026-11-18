@@ -265,6 +265,7 @@ class ReboundScanner:
                             # При смене списка оставляем кэш только для отслеживаемых монет.
                             self._levels_cache = {s: v for s, v in self._levels_cache.items() if s in symbols}
                             self._levels_cache_time = {s: v for s, v in self._levels_cache_time.items() if s in symbols}
+                            self._last_ws_price_at = {s: v for s, v in self._last_ws_price_at.items() if s in symbols}
                             self._active_alerts = {k for k in self._active_alerts if k[0] in symbols}
                         self.on_symbols(len(symbols))
                     with self._lock:
@@ -475,9 +476,9 @@ class ReboundScanner:
                             key = self._alert_key(symbol, name)
                             with self._lock:
                                 self._prune_level_state(symbol, name, key)
-                            if self._last_confirmed_candle.get(key) == close_time:
-                                continue
-                            self._last_confirmed_candle[key] = close_time
+                                if self._last_confirmed_candle.get(key) == close_time:
+                                    continue
+                                self._last_confirmed_candle[key] = close_time
                             metrics = self.evaluate_rejection(closed, level, direction)
                             if not metrics:
                                 continue
