@@ -337,9 +337,11 @@ class ReboundScanner:
     def stop(self):
         self._stop.set()
         # Фиксируем состояние даже если цена давно не обновлялась.
+        # Чтение WebSocket-приложения синхронизировано с его публикацией:
+        # так stop не пропустит соединение, создаваемое параллельно.
         with self._lock:
             self._persist_state_locked()
-        app = self._ws_app
+            app = self._ws_app
         if app is not None:
             try:
                 app.close()
@@ -678,15 +680,29 @@ class ReboundScanner:
                 def on_open(_ws):
                     self.on_status("WebSocket Binance подключён · получаем поток цен")
 
-                self._ws_app = websocket.WebSocketApp(
+                app = websocket.WebSocketApp(
                     self.WS_URL, on_message=on_message, on_error=on_error, on_open=on_open
                 )
-                self._ws_app.run_forever(ping_interval=150, ping_timeout=20)
+                with self._lock:
+                    stopping = self._stop.is_set()
+                    if not stopping:
+                        self._ws_app = app
+                if stopping:
+                    # stop мог сработать во время конструктора WebSocketApp,
+                    # до того как объект стал доступен методу stop().
+                    try:
+                        app.close()
+                    except Exception:
+                        pass
+                    break
+                app.run_forever(ping_interval=150, ping_timeout=20)
             except Exception as exc:
                 if not self._stop.is_set():
                     self.on_status(f"Не удалось подключить WebSocket: {str(exc)[:100]}")
             finally:
-                self._ws_app = None
+                with self._lock:
+                    if self._ws_app is locals().get("app"):
+                        self._ws_app = None
             if not self._stop.is_set():
                 self.on_status("WebSocket отключён. Повторное подключение через 5 секунд…")
                 self._stop.wait(5)
