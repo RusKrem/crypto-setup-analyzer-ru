@@ -359,6 +359,12 @@ class ReboundScanner:
 
     def _handle_price(self, symbol, price, source="websocket", event_time_ms=None):
         """Обрабатывает цену; REST не перезаписывает свежие данные WebSocket."""
+        try:
+            price = float(price)
+        except (TypeError, ValueError):
+            return
+        if not math.isfinite(price) or price <= 0:
+            return
         now = time.time()
         with self._lock:
             if symbol not in self._symbols:
@@ -372,7 +378,7 @@ class ReboundScanner:
                 self._last_ws_event_time[symbol] = event_time
                 self._last_ws_price_at[symbol] = now
             levels = list(self._levels_cache.get(symbol, []))
-        if not levels or not math.isfinite(float(price)) or price <= 0:
+        if not levels:
             return
         now = time.time()
         active_now = set()
@@ -529,7 +535,7 @@ class ReboundScanner:
                             symbol = item.get("s")
                             if symbol in tracked:
                                 # Поле c в !ticker@arr содержит последнюю цену.
-                                self._handle_price(symbol, float(item.get("c", 0)), source="websocket", event_time_ms=item.get("E"))
+                                self._handle_price(symbol, item.get("c", 0), source="websocket", event_time_ms=item.get("E"))
                     except Exception as exc:
                         self.on_status(f"Ошибка обработки WebSocket: {str(exc)[:100]}")
 
