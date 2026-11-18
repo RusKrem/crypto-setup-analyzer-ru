@@ -1,0 +1,13 @@
+БЫСТРАЯ УСТАНОВКА REVERSAL LAB OBSERVER
+
+1. Закрой Crypto Setup Analyzer и Telegram Bridge.
+2. Распакуй архив OBSERVER_PATCH поверх папки Crypto_Setup_Analyzer_RU_v1_27, сохранив структуру папок и разрешив замену файлов.
+3. Открой telegram_bridge и запусти REBUILD_TELEGRAM_BRIDGE.bat.
+4. Дождись [SUCCESS], затем запускай telegram_bridge/start_bridge.bat.
+5. Запусти основное приложение обычным способом.
+6. После первой успешной отправки в telegram_bridge_log.txt появится [OBSERVER SAVED].
+7. Отчёт за 24 часа: observer/START_OBSERVER_REPORT.bat.
+
+Данные создаются в observer_data/observer_events.sqlite3 и observer_data/media/.
+Не публикуй observer_data, .env, токен, логи и рабочую очередь в GitHub.
+Сканер и критерии сигналов Observer не меняет.

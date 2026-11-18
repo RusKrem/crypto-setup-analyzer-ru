@@ -1,0 +1,89 @@
+import sqlite3
+import tempfile
+import time
+import unittest
+from pathlib import Path
+
+from observer.storage import archive_delivery, parse_notification
+
+
+class ObserverTests(unittest.TestCase):
+    def test_parse_approach_notification(self):
+        item = {
+            "id": "approach-1",
+            "kind": "LEVEL_APPROACH",
+            "created_ts": 1700000000,
+            "text": (
+                "🔔 REVERSAL LAB | ПРИБЛИЖЕНИЕ К УРОВНЮ\n"
+                "ZECUSDT · LONG\n"
+                "Уровень: Today Low (Текущий день): 1171.72\n"
+                "Цена: 1176.82 · расстояние: 0.435%\n"
+            ),
+        }
+        event = parse_notification(item, sent_at=1700000005)
+        self.assertEqual(event["symbol"], "ZECUSDT")
+        self.assertEqual(event["direction"], "LONG")
+        self.assertEqual(event["level_name"], "Today Low")
+        self.assertAlmostEqual(event["level_price"], 1171.72)
+        self.assertAlmostEqual(event["price"], 1176.82)
+        self.assertAlmostEqual(event["distance_pct"], 0.435)
+
+    def test_parse_confirmation_notification(self):
+        item = {
+            "id": "confirm-1",
+            "kind": "REACTION_CONFIRMED",
+            "created_ts": 1700000000,
+            "text": (
+                "✅ REVERSAL LAB | РЕАКЦИЯ ПОДТВЕРЖДЕНА\n"
+                "TRUMPUSDT · LONG\n"
+                "Уровень: Today Low · 1.112\n"
+                "Тень/тело: 5.00 · позиция закрытия: 86% от минимума свечи\n"
+            ),
+        }
+        event = parse_notification(item, sent_at=1700000005)
+        self.assertEqual(event["symbol"], "TRUMPUSDT")
+        self.assertEqual(event["level_name"], "Today Low")
+        self.assertAlmostEqual(event["level_price"], 1.112)
+        self.assertAlmostEqual(event["wick_body_ratio"], 5.0)
+        self.assertAlmostEqual(event["close_position"], 0.86)
+
+    def test_archive_copies_image_and_saves_telegram_metadata(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            queue = base / "telegram_queue"
+            queue.mkdir()
+            photo = queue / "card.png"
+            photo.write_bytes(b"fake-png-bytes")
+            item = {
+                "id": "photo-1", "kind": "REACTION_CONFIRMED",
+                "created_ts": time.time(), "photo_path": str(photo),
+                "text": "✅ REVERSAL LAB | РЕАКЦИЯ ПОДТВЕРЖДЕНА\nZECUSDT · LONG\nУровень: PDL · 1176.98",
+                "metadata": {"symbol": "ZECUSDT", "direction": "LONG", "level_name": "PDL",
+                             "level": 1176.98, "price": 1180.27, "close_position": 0.81},
+            }
+            api_result = {"ok": True, "result": {"message_id": 321, "chat": {"id": -100123}}}
+            self.assertTrue(archive_delivery(base, item, api_result))
+            self.assertTrue(photo.exists())  # Bridge сам удалит исходник после архивации.
+            db = base / "observer_data" / "observer_events.sqlite3"
+            with sqlite3.connect(db) as conn:
+                row = conn.execute(
+                    "SELECT symbol, level_name, telegram_chat_id, telegram_message_id, media_path, price, close_position FROM events"
+                ).fetchone()
+            self.assertEqual(row[:4], ("ZECUSDT", "PDL", "-100123", "321"))
+            self.assertEqual(row[5:], (1180.27, 0.81))
+            archived = base / "observer_data" / row[4]
+            self.assertTrue(archived.exists())
+            self.assertEqual(archived.read_bytes(), b"fake-png-bytes")
+
+    def test_same_queue_id_is_not_archived_twice(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            item = {"id": "same-id", "kind": "LEVEL_APPROACH", "text": "ZECUSDT · LONG"}
+            self.assertTrue(archive_delivery(tmp, item, {"ok": True}))
+            self.assertFalse(archive_delivery(tmp, item, {"ok": True}))
+            with sqlite3.connect(Path(tmp) / "observer_data" / "observer_events.sqlite3") as conn:
+                count = conn.execute("SELECT COUNT(*) FROM events").fetchone()[0]
+            self.assertEqual(count, 1)
+
+
+if __name__ == "__main__":
+    unittest.main()

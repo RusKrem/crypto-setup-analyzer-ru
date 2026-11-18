@@ -16,6 +16,7 @@ Crypto Setup Analyzer RU is a desktop research tool for monitoring selected Bina
 - Telegram notification queue separated from the scanner process.
 - Branded Telegram image cards rendered from **actual closed Binance Futures klines**; synthetic candles are rejected.
 - SQLite persistence for recorded events and virtual-trade data structures.
+- Reversal Lab Observer: a local archive of successfully delivered Telegram notifications, structured signal fields, and PNG cards.
 - Desktop UI with sortable monitoring table and scrolling.
 - Unit tests for scanner logic, storage, card generation, notification queue, and backtest behaviour.
 
@@ -55,7 +56,9 @@ For Telegram notifications:
 1. Copy `.env.example` to `.env` in the project root.
 2. Set `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHANNEL` locally.
 3. Follow [TELEGRAM_BRIDGE_SETUP_RU.md](TELEGRAM_BRIDGE_SETUP_RU.md) to build and configure the separate bridge executable.
-4. Never commit `.env`, bot tokens, queue contents, or private logs.
+4. After installing Observer, rebuild the bridge with `telegram_bridge/REBUILD_TELEGRAM_BRIDGE.bat`; the old executable does not include the archive feature.
+5. View the local report with `observer/START_OBSERVER_REPORT.bat`.
+6. Never commit `.env`, bot tokens, queue contents, `observer_data/`, or private logs.
 
 ## Run tests
 
@@ -65,7 +68,7 @@ From the project root:
 python -m unittest discover -v
 ```
 
-The portfolio package was checked in the build environment on 4 November 2026: **23 unit tests passed**. This is not a substitute for a full GUI acceptance test on a Windows machine or a live end-to-end Telegram test in your network environment.
+The portfolio package was checked in the build environment on 4 November 2026: **23 unit tests passed**. After patches 01/02 and the Observer addition (9 November 2026), the suite contains **39 passing tests** (Python 3.13.5, pandas 2.2.3, Matplotlib 3.10.8 in the patch environment). This is not a substitute for a full GUI acceptance test on a Windows machine or a live end-to-end Telegram test in your network environment.
 
 ## Project structure
 
@@ -77,6 +80,8 @@ services/                      Market-data and indicator services
 models/                        Signal and virtual-trade models
 infrastructure/                SQLite persistence
 telegram_bridge/               Standalone Telegram delivery bridge source/build scripts
+observer/                       Local event archive and reporting utility
+observer_data/                  Local runtime archive (created automatically; private)
 telegram_queue/                Local file-based notification queue (runtime data)
 tests/                         Unit tests
 assets/                        Reversal Lab brand assets

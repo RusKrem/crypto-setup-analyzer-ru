@@ -59,7 +59,7 @@ class TelegramNotifier:
                 pass
             return False, f"Не удалось записать telegram_queue: {exc}"
 
-    def send_photo(self, image_path, caption, kind="SIGNAL_CARD", ttl_seconds=300):
+    def send_photo(self, image_path, caption, kind="SIGNAL_CARD", ttl_seconds=300, metadata=None):
         if not self.configured:
             return False, "Telegram не настроен"
         self.queue_dir.mkdir(parents=True, exist_ok=True)
@@ -67,6 +67,9 @@ class TelegramNotifier:
         payload = {"id": uuid.uuid4().hex, "created_ts": created, "channel": self.chat_id,
                    "text": str(caption), "kind": kind, "photo_path": str(Path(image_path).resolve()),
                    "attempts": 0, "ttl_seconds": int(ttl_seconds)}
+        if isinstance(metadata, dict):
+            # Только компактные поля события. Свечи и другие большие массивы в очередь не копируем.
+            payload["metadata"] = metadata
         filename = f"{int(created * 1000)}_{payload['id']}.json"
         final_path = self.queue_dir / filename
         tmp_path = final_path.with_suffix(".json.tmp")
@@ -108,7 +111,15 @@ class TelegramNotifier:
         except Exception as exc:
             image_path.unlink(missing_ok=True)
             return False, f"Карточка не отправлена: ошибка построения по реальным свечам: {exc}"
-        result = self.send_photo(image_path, caption, kind=queue_kind, ttl_seconds=ttl_seconds)
+        metadata_keys = (
+            "symbol", "direction", "level_name", "level_group", "level", "price",
+            "distance_pct", "time", "candle_open_time", "wick_body_ratio",
+            "close_position", "candle_open", "candle_high", "candle_low", "candle_close",
+        )
+        metadata = {key: signal[key] for key in metadata_keys if key in signal}
+        result = self.send_photo(
+            image_path, caption, kind=queue_kind, ttl_seconds=ttl_seconds, metadata=metadata
+        )
         if not result[0]:
             image_path.unlink(missing_ok=True)
         return result

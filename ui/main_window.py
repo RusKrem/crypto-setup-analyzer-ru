@@ -218,9 +218,9 @@ class App:
                         combined = pd.concat([self.df.drop(columns=["PDH","PDL"], errors="ignore"), fresh], ignore_index=True)
                         combined["timestamp"] = pd.to_datetime(combined["timestamp"], utc=True)
                         combined = combined.sort_values("timestamp").drop_duplicates("timestamp", keep="last").reset_index(drop=True)
-                        max_rows = min(max(old_count, 500), 1200)
-                        if len(combined) > max_rows:
-                            combined = combined.tail(max_rows).reset_index(drop=True)
+                        # Keep the same rolling history depth the user initially loaded.
+                        # A hard 1200-row cap discards days/weeks needed for PDH/PDL and PWH/PWL.
+                        combined = self.indicators.retain_live_history_depth(combined, old_count)
                         new_last = pd.to_datetime(combined.timestamp.iloc[-1], utc=True)
                         changed = (new_last != old_last or float(combined.close.iloc[-1]) != old_close or
                                    float(combined.high.iloc[-1]) != old_high or float(combined.low.iloc[-1]) != old_low or
@@ -432,7 +432,11 @@ class App:
         old_ylim = self.ax.get_ylim() if preserve_view else None
         if self.df is None or self.df.empty:
             self._empty(); return
-        df=self.df.tail(300).reset_index(drop=True)
+        # Keep the full loaded history for calculations; only the candle rendering
+        # window is limited to the latest 300 rows for UI responsiveness.
+        history_df = self.df
+        reference_levels = self.indicators.calculate_reference_levels(history_df)
+        df=history_df.tail(300).reset_index(drop=True)
         self._visible_count=len(df)
         first_time=df.timestamp.iloc[0]
         ev=self.events[self.events.time>=first_time].copy() if not self.events.empty else self.events
@@ -500,28 +504,24 @@ class App:
             if right_tag:
                 add_price_tag(price,name,color)
 
-        # Дневные уровни предыдущего UTC-дня.
+        # Daily and weekly levels are calculated from full history, not the
+        # 300-candle viewport. Incomplete UTC windows are intentionally omitted.
         if self.levels.get():
-            last=df.iloc[-1]
             for key,name,color,style in [
                 ("PDH","PDH · МАКС. ПРЕДЫДУЩЕГО ДНЯ","#d97706",(0,(8,3))),
                 ("PDL","PDL · МИН. ПРЕДЫДУЩЕГО ДНЯ","#2563eb",(0,(3,2,1,2)))]:
-                if key in df.columns and pd.notna(last[key]):
-                    draw_key_level(last[key],name,color,style,1.9,right_tag=False)
+                if key in reference_levels:
+                    draw_key_level(reference_levels[key],name,color,style,1.9,right_tag=False)
 
-        # Недельные уровни считаются по завершённой предыдущей UTC-неделе.
-        ts_all=pd.to_datetime(df["timestamp"],utc=True,errors="coerce")
-        if self.weekly_levels.get() and ts_all.notna().any():
-            work=df.loc[ts_all.notna()].copy()
-            work["_ts"]=pd.to_datetime(work["timestamp"],utc=True)
-            latest=work["_ts"].max()
-            week_start=latest.normalize()-pd.Timedelta(days=latest.weekday())
-            prev_start=week_start-pd.Timedelta(days=7)
-            prev_week=work[(work["_ts"]>=prev_start)&(work["_ts"]<week_start)]
-            if not prev_week.empty:
-                draw_key_level(prev_week.high.max(),"PWH · МАКС. ПРЕДЫДУЩЕЙ НЕДЕЛИ","#7c3aed",(0,(10,3)),1.8)
-                draw_key_level(prev_week.low.min(),"PWL · МИН. ПРЕДЫДУЩЕЙ НЕДЕЛИ","#0891b2",(0,(2,2)),1.8)
-                draw_key_level(prev_week.close.iloc[-1],"PWC · ЗАКРЫТИЕ ПРЕДЫДУЩЕЙ НЕДЕЛИ","#64748b","-",1.35)
+        if self.weekly_levels.get():
+            for key,name,color,style,width in [
+                ("PWH","PWH · МАКС. ПРЕДЫДУЩЕЙ НЕДЕЛИ","#7c3aed",(0,(10,3)),1.8),
+                ("PWL","PWL · МИН. ПРЕДЫДУЩЕЙ НЕДЕЛИ","#0891b2",(0,(2,2)),1.8),
+                ("PWC","PWC · ЗАКРЫТИЕ ПРЕДЫДУЩЕЙ НЕДЕЛИ","#64748b","-",1.35)]:
+                if key in reference_levels:
+                    draw_key_level(reference_levels[key],name,color,style,width)
+
+        ts_all=pd.to_datetime(history_df["timestamp"],utc=True,errors="coerce")
 
         # Экстремумы и уровни по повторным касаниям. Для защиты от шума проверяем локальные окна.
         if self.swing_levels.get() and len(df)>=7:
@@ -539,12 +539,17 @@ class App:
         # Максимумы и минимумы каждой торговой сессии группируются по UTC-дате.
         # В подписи указываем дату, чтобы было понятно, к какому дню относится уровень.
         if self.session_levels.get() and ts_all.notna().any():
-            work=df.loc[ts_all.notna()].copy()
+            work=history_df.loc[ts_all.notna()].copy()
             work["_ts_utc"]=pd.to_datetime(work["timestamp"],utc=True,errors="coerce")
             work["_day_utc"]=work["_ts_utc"].dt.strftime("%d.%m.%Y")
             work["_hour_utc"]=work["_ts_utc"].dt.hour
+            # Calculate complete session extremes from history, but only draw
+            # sessions belonging to UTC dates represented in the visible chart.
+            visible_days=set(pd.to_datetime(df["timestamp"],utc=True,errors="coerce").dt.strftime("%d.%m.%Y").dropna())
             sessions=[("Азия",0,8,"#9333ea"),("Лондон",8,16,"#0284c7"),("Нью-Йорк",13,22,"#ca8a04")]
             for day_label, day_part in work.groupby("_day_utc",sort=True):
+                if day_label not in visible_days:
+                    continue
                 for session_name,start_hour,end_hour,color in sessions:
                     part=day_part[(day_part["_hour_utc"]>=start_hour)&(day_part["_hour_utc"]<end_hour)]
                     if not part.empty:
@@ -552,14 +557,11 @@ class App:
                         draw_key_level(part.low.min(),f"{session_name} · LOW · {day_label}",color,(0,(2,2)),1.25,right_tag=False)
 
         # High/Low текущего дня оставлены отдельным переключателем.
-        if self.today_hilo.get() and "timestamp" in df.columns and not df.empty:
-            ts=pd.to_datetime(df["timestamp"],utc=True,errors="coerce")
-            latest_day=ts.iloc[-1].date() if pd.notna(ts.iloc[-1]) else None
-            if latest_day is not None:
-                day_df=df.loc[ts.dt.date == latest_day]
-                if not day_df.empty:
-                    draw_key_level(day_df.high.max(),"HIGH · МАКСИМУМ ТЕКУЩЕГО ДНЯ","#c026d3",(0,(7,2,1,2)),1.7,right_tag=False)
-                    draw_key_level(day_df.low.min(),"LOW · МИНИМУМ ТЕКУЩЕГО ДНЯ","#0891b2",(0,(2,2)),1.7,right_tag=False)
+        if self.today_hilo.get():
+            if "Today High" in reference_levels:
+                draw_key_level(reference_levels["Today High"],"HIGH · МАКСИМУМ ТЕКУЩЕГО ДНЯ","#c026d3",(0,(7,2,1,2)),1.7,right_tag=False)
+            if "Today Low" in reference_levels:
+                draw_key_level(reference_levels["Today Low"],"LOW · МИНИМУМ ТЕКУЩЕГО ДНЯ","#0891b2",(0,(2,2)),1.7,right_tag=False)
 
         # FVG: current timeframe plus optional overlays from all downloaded timeframes.
         # Higher-timeframe zones are projected onto the current chart using their timestamps.

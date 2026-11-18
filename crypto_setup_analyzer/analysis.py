@@ -8,6 +8,93 @@ def add_levels(candles):
     daily["PDL"] = daily.day_low.shift(1)
     return df.join(daily[["PDH", "PDL"]], on="_day").drop(columns="_day")
 
+
+def calculate_reference_levels(candles):
+    """Calculate UTC reference levels from the full available candle history.
+
+    Incomplete previous-day or previous-week windows are omitted instead of
+    being presented as valid levels. The current-day range is available only
+    when the supplied history starts close to 00:00 UTC for that day.
+    """
+    required = {"timestamp", "high", "low", "close"}
+    missing = sorted(required.difference(candles.columns))
+    if missing:
+        raise ValueError("Не хватает столбцов для расчёта уровней: " + ", ".join(missing))
+    if candles.empty:
+        return {}
+
+    work = candles[["timestamp", "high", "low", "close"]].copy()
+    work["_ts"] = pd.to_datetime(work["timestamp"], utc=True, errors="coerce")
+    for column in ("high", "low", "close"):
+        work[column] = pd.to_numeric(work[column], errors="coerce")
+    work = work.dropna(subset=["_ts", "high", "low", "close"]).sort_values("_ts")
+    if work.empty:
+        return {}
+
+    deltas = work["_ts"].diff().dropna().dt.total_seconds() * 1000
+    deltas = deltas[deltas > 0]
+    if deltas.empty:
+        return {}
+    interval_ms = float(deltas.median())
+    if not pd.notna(interval_ms) or interval_ms <= 0:
+        return {}
+
+    latest = work["_ts"].iloc[-1]
+    today_start = latest.floor("D")
+    interval = pd.Timedelta(milliseconds=interval_ms)
+    result = {}
+
+    def has_no_large_gaps(window):
+        gaps = window["_ts"].diff().dropna()
+        return gaps.empty or bool((gaps <= interval * 1.5).all())
+
+    today = work[work["_ts"] >= today_start]
+    # Do not call a partial or internally gapped intraday download the full range.
+    if (not today.empty
+            and today["_ts"].iloc[0] <= today_start + interval * 1.5
+            and has_no_large_gaps(today)):
+        result["Today High"] = float(today["high"].max())
+        result["Today Low"] = float(today["low"].min())
+
+    def complete_window(window, start, end):
+        """Accept a window only when both boundaries and most candles exist."""
+        if window.empty:
+            return False
+        first_ts = window["_ts"].iloc[0]
+        last_ts = window["_ts"].iloc[-1]
+        if first_ts > start + interval * 1.5:
+            return False
+        if last_ts < end - interval * 1.5:
+            return False
+        expected = (end - start).total_seconds() * 1000 / interval_ms
+        if len(window) < expected * 0.95:
+            return False
+        return has_no_large_gaps(window)
+
+    previous_day_start = today_start - pd.Timedelta(days=1)
+    previous_day = work[(work["_ts"] >= previous_day_start) & (work["_ts"] < today_start)]
+    if complete_window(previous_day, previous_day_start, today_start):
+        result["PDH"] = float(previous_day["high"].max())
+        result["PDL"] = float(previous_day["low"].min())
+
+    week_start = today_start - pd.Timedelta(days=today_start.weekday())
+    previous_week_start = week_start - pd.Timedelta(days=7)
+    previous_week = work[(work["_ts"] >= previous_week_start) & (work["_ts"] < week_start)]
+    if complete_window(previous_week, previous_week_start, week_start):
+        result["PWH"] = float(previous_week["high"].max())
+        result["PWL"] = float(previous_week["low"].min())
+        result["PWC"] = float(previous_week["close"].iloc[-1])
+
+    return result
+
+
+def retain_live_history_depth(combined, previous_count, minimum_rows=500):
+    """Keep the user's loaded history depth while allowing a small warm-up floor."""
+    keep_rows = max(int(previous_count), int(minimum_rows))
+    if len(combined) <= keep_rows:
+        return combined.reset_index(drop=True)
+    return combined.tail(keep_rows).reset_index(drop=True)
+
 def find_events(candles, lookback=20, min_fvg_pct=0.02):
     """Find visual FVG zones and liquidity sweeps; no trading signals/orders."""
     df = candles.reset_index(drop=True)

@@ -2,7 +2,7 @@
 from __future__ import annotations
 import time
 import threading
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import requests
 import json
 import websocket
@@ -11,6 +11,31 @@ BASE_URL = "https://fapi.binance.com"
 TOP_ALTCOINS_COUNT = 30
 MIN_QUOTE_VOLUME_USDT = 2_000_000
 ALERT_DISTANCE_PCT = 0.5
+
+# Направление ожидаемого подхода к каждому опорному уровню.
+# Поддержка: цена подходит сверху вниз (LONG).
+# Сопротивление: цена подходит снизу вверх (SHORT).
+LEVEL_DIRECTIONS = {
+    "PDL": "LONG",
+    "PWL": "LONG",
+    "Today Low": "LONG",
+    "PDH": "SHORT",
+    "PWH": "SHORT",
+    "Today High": "SHORT",
+}
+
+
+def _is_valid_approach_side(level_name: str, price: float, level: float) -> bool:
+    """Проверяет, что цена подходит к уровню с ожидаемой стороны."""
+    direction = LEVEL_DIRECTIONS.get(level_name)
+    if direction == "LONG":
+        return price > level
+    if direction == "SHORT":
+        return price < level
+    # Неизвестные уровни не должны генерировать сигналы с неподтверждённой семантикой.
+    return False
+
+
 EXCLUDED_BASES = {
     "BTC", "ETH", "BNB", "SOL", "XRP", "USDC", "FDUSD", "TUSD", "USDP", "DAI",
     "EUR", "TRY", "BRL", "GBP", "AUD", "UST", "USTC", "PAXG", "WBTC", "WBETH",
@@ -100,6 +125,27 @@ def _levels(session, symbol):
     return [(name, price, group) for name, price, group in levels if price > 0]
 
 
+def _level_period_token(level_name: str, now: datetime | None = None):
+    """Возвращает стабильный идентификатор периода для уровня.
+
+    Цена Today High/Low может меняться при каждом обновлении Binance, но это
+    всё ещё тот же дневной уровень. Идентификатор меняется только при переходе
+    к новому календарному дню/неделе UTC.
+    """
+    now = now or datetime.now(timezone.utc)
+    today = now.astimezone(timezone.utc).date()
+
+    if level_name in ("Today High", "Today Low"):
+        return ("day", today.isoformat())
+    if level_name in ("PDH", "PDL"):
+        return ("day", (today - timedelta(days=1)).isoformat())
+    if level_name in ("PWH", "PWL", "PWC"):
+        current_week_start = today - timedelta(days=today.weekday())
+        previous_week_start = current_week_start - timedelta(days=7)
+        return ("week", previous_week_start.isoformat())
+    return ("level", level_name)
+
+
 def scan_symbol(session, symbol: str, current_price: float | None = None):
     """Выдаёт только предупреждение о приближении в пределах 0,5%, без сигналов входа."""
     if current_price is None:
@@ -109,11 +155,14 @@ def scan_symbol(session, symbol: str, current_price: float | None = None):
     alerts = []
     for name, level, group in _levels(session, symbol):
         distance = abs(current_price-level)/level*100
-        # Только приближение: цена должна ещё не пересечь уровень.
-        if 0 < distance <= ALERT_DISTANCE_PCT:
+        direction = LEVEL_DIRECTIONS.get(name)
+        # Предупреждаем только до пересечения: LONG подходит к поддержке сверху,
+        # SHORT подходит к сопротивлению снизу.
+        correct_side = _is_valid_approach_side(name, current_price, level)
+        if correct_side and 0 < distance <= ALERT_DISTANCE_PCT:
             alerts.append({"symbol": symbol, "level_name": name, "level_group": group,
-                           "level": level, "price": current_price, "distance_pct": distance,
-                           "time": int(time.time()*1000),
+                           "direction": direction, "level": level, "price": current_price,
+                           "distance_pct": distance, "time": int(time.time()*1000),
                            "details": f"Цена в {distance:.3f}% от уровня; касание ещё не подтверждено"})
     return sorted(alerts, key=lambda x: x["distance_pct"])
 
@@ -246,6 +295,32 @@ class ReboundScanner:
                     self.on_status(f"Ошибка подготовки сканера: {str(exc)[:140]}")
                 self._stop.wait(2)
 
+    @staticmethod
+    def _alert_key(symbol, level_name, now=None):
+        """Ключ алерта не зависит от плавающей цены динамического экстремума."""
+        return (symbol, level_name, _level_period_token(level_name, now))
+
+    def _prune_level_state(self, symbol, level_name, keep_key):
+        """Удаляет состояние того же уровня из уже завершившихся периодов."""
+        stale_keys = {
+            key for key in self._active_alerts
+            if key[0] == symbol and key[1] == level_name and key != keep_key
+        }
+        for mapping in (self._approach_started, self._last_confirmed_candle):
+            stale_keys.update(
+                key for key in mapping
+                if key[0] == symbol and key[1] == level_name and key != keep_key
+            )
+        stale_keys.update(
+            key for key in self._confirmed_alerts
+            if key[0] == symbol and key[1] == level_name and key != keep_key
+        )
+        self._active_alerts.difference_update(stale_keys)
+        self._confirmed_alerts.difference_update(stale_keys)
+        for mapping in (self._approach_started, self._last_confirmed_candle):
+            for key in stale_keys:
+                mapping.pop(key, None)
+
     def _handle_price(self, symbol, price):
         """Обрабатывает новое событие цены от Binance WebSocket."""
         with self._lock:
@@ -260,13 +335,19 @@ class ReboundScanner:
             if level <= 0:
                 continue
             distance = abs(price - level) / level * 100
-            in_zone = 0 < distance <= self.alert_distance_pct
+            direction = LEVEL_DIRECTIONS.get(name)
+            correct_side = _is_valid_approach_side(name, price, level)
+            in_zone = correct_side and 0 < distance <= self.alert_distance_pct
             update = {"symbol": symbol, "level_name": name, "level_group": group,
-                      "level": level, "price": price, "distance_pct": distance,
-                      "time": int(now * 1000), "in_zone": in_zone}
+                      "direction": direction, "level": level, "price": price,
+                      "distance_pct": distance, "time": int(now * 1000),
+                      "in_zone": in_zone, "correct_side": correct_side}
             self.on_price_update(update)
-            alert_key = (symbol, name, round(level, 8))
+            alert_key = self._alert_key(symbol, name)
             with self._lock:
+                # Сохраняем блокировку при изменении цены Today High/Low.
+                # При смене календарного периода удаляем старое состояние.
+                self._prune_level_state(symbol, name, alert_key)
                 was_active = alert_key in self._active_alerts
                 is_new = False
                 if was_active and distance <= 0.7:
@@ -334,7 +415,9 @@ class ReboundScanner:
                         close_time = int(closed[6])
                         for name, level, group in levels_by_symbol.get(symbol, []):
                             direction = "LONG" if name in ("PDL", "PWL", "Today Low") else "SHORT"
-                            key = (symbol, name, round(level, 8))
+                            key = self._alert_key(symbol, name)
+                            with self._lock:
+                                self._prune_level_state(symbol, name, key)
                             if self._last_confirmed_candle.get(key) == close_time:
                                 continue
                             self._last_confirmed_candle[key] = close_time

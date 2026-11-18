@@ -9,6 +9,7 @@
 - `crypto_setup_analyzer/signal_card.py` renders branded cards. It validates the Binance kline shape and OHLC consistency before drawing.
 - `crypto_setup_analyzer/telegram_notifier.py` writes notification jobs to a local file queue.
 - `telegram_bridge/bridge.py` is a separate delivery process for Telegram Bot API calls.
+- `observer/storage.py` archives the delivered notification and its image only after Telegram returns a successful response; `observer/report.py` produces local summaries.
 - `infrastructure/storage.py` persists application records in SQLite.
 - `models/` contains signal and virtual-trade data models.
 - `tests/` covers key behaviours without requiring live exchange credentials.
@@ -20,6 +21,7 @@
 3. The card renderer validates and draws the actual OHLC data.
 4. The notifier writes a JSON job referencing the rendered image into `telegram_queue/`.
 5. The bridge reads queued jobs and delivers them to the configured Telegram channel.
+6. After confirmed delivery, Observer stores the event metadata and a copy of its PNG card in `observer_data/`.
 
 The queue/bridge separation keeps Telegram network routing independent of Binance market-data traffic.
 

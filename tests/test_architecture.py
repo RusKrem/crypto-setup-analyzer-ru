@@ -22,6 +22,7 @@ class ArchitectureTests(unittest.TestCase):
         levels = service.add_levels(frame)
         self.assertIn("PDH", levels.columns)
         self.assertIn("PDL", levels.columns)
+        self.assertIsInstance(service.calculate_reference_levels(levels), dict)
         self.assertIsInstance(service.find_events(levels), pd.DataFrame)
         self.assertIsInstance(service.find_price_reactions(levels), pd.DataFrame)
         self.assertIsInstance(service.find_order_blocks(levels), pd.DataFrame)

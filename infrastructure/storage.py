@@ -1,5 +1,6 @@
 """Хранилище SQLite для сигналов и виртуальных сделок."""
 import sqlite3
+from contextlib import contextmanager
 from pathlib import Path
 
 class Storage:
@@ -9,11 +10,19 @@ class Storage:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._initialize()
 
+    @contextmanager
     def _connect(self):
-        """Создаёт отдельное соединение для текущей операции."""
+        """Создаёт соединение и гарантированно закрывает его после операции."""
         connection = sqlite3.connect(self.path, timeout=10)
         connection.row_factory = sqlite3.Row
-        return connection
+        try:
+            yield connection
+            connection.commit()
+        except BaseException:
+            connection.rollback()
+            raise
+        finally:
+            connection.close()
 
     def _initialize(self):
         """Создаёт таблицы, если база запускается впервые."""

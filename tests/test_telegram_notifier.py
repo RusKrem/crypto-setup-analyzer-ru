@@ -62,6 +62,9 @@ class TelegramNotifierTests(unittest.TestCase):
             self.assertEqual(item["ttl_seconds"], 300)
             self.assertEqual(item["kind"], "LEVEL_APPROACH")
             self.assertTrue(item["photo_path"].endswith(".png"))
+            self.assertEqual(item["metadata"]["symbol"], "ABCUSDT")
+            self.assertEqual(item["metadata"]["level_name"], "PDL")
+            self.assertAlmostEqual(item["metadata"]["price"], 1.0)
 
     def test_level_alert_does_not_fall_back_to_text_without_real_candles(self):
         with tempfile.TemporaryDirectory() as folder:

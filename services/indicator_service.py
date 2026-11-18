@@ -8,6 +8,12 @@ class IndicatorService:
     def add_levels(self, candles):
         return analysis.add_levels(candles)
 
+    def calculate_reference_levels(self, candles):
+        return analysis.calculate_reference_levels(candles)
+
+    def retain_live_history_depth(self, combined, previous_count):
+        return analysis.retain_live_history_depth(combined, previous_count)
+
     def find_events(self, candles):
         return analysis.find_events(candles)
 

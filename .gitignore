@@ -1,0 +1,21 @@
+.env
+.venv/
+__pycache__/
+*.py[cod]
+*.db
+*.sqlite
+*.sqlite3
+telegram_queue/*
+!telegram_queue/.gitkeep
+telegram_bridge/TelegramBridge.exe
+telegram_bridge/build/
+telegram_bridge/dist/
+build/
+dist/
+*.log
+.DS_Store
+Thumbs.db
+
+# Локальный архив Telegram-событий (не публиковать)
+observer_data/
+observer_last_week.csv

@@ -15,6 +15,41 @@ class ReboundScannerTests(unittest.TestCase):
             result = scan_symbol(object(), "TESTUSDT", current_price=100.8)
         self.assertEqual(result, [])
 
+    def test_support_warning_is_suppressed_after_level_was_broken(self):
+        with patch("crypto_setup_analyzer.rebound_scanner._levels", return_value=[("PDL", 100.0, "Дневные")]):
+            result = scan_symbol(object(), "TESTUSDT", current_price=99.7)
+        self.assertEqual(result, [])
+
+    def test_resistance_warning_is_suppressed_after_level_was_broken(self):
+        with patch("crypto_setup_analyzer.rebound_scanner._levels", return_value=[("PDH", 100.0, "Дневные")]):
+            result = scan_symbol(object(), "TESTUSDT", current_price=100.3)
+        self.assertEqual(result, [])
+
+    def test_approach_warning_contains_expected_direction(self):
+        levels = [("PDL", 100.0, "Дневные"), ("PDH", 200.0, "Дневные")]
+        with patch("crypto_setup_analyzer.rebound_scanner._levels", return_value=levels):
+            result = scan_symbol(object(), "TESTUSDT", current_price=100.3)
+        self.assertEqual([item["direction"] for item in result], ["LONG"])
+
+    def test_all_six_levels_only_alert_from_the_correct_side(self):
+        cases = (
+            ("PDL", 100.3, 99.7, "LONG"),
+            ("PWL", 100.3, 99.7, "LONG"),
+            ("Today Low", 100.3, 99.7, "LONG"),
+            ("PDH", 99.7, 100.3, "SHORT"),
+            ("PWH", 99.7, 100.3, "SHORT"),
+            ("Today High", 99.7, 100.3, "SHORT"),
+        )
+        for level_name, valid_price, invalid_price, direction in cases:
+            with self.subTest(level=level_name):
+                level_data = [(level_name, 100.0, "Тест")]
+                with patch("crypto_setup_analyzer.rebound_scanner._levels", return_value=level_data):
+                    valid_result = scan_symbol(object(), "TESTUSDT", current_price=valid_price)
+                    invalid_result = scan_symbol(object(), "TESTUSDT", current_price=invalid_price)
+                self.assertEqual(len(valid_result), 1)
+                self.assertEqual(valid_result[0]["direction"], direction)
+                self.assertEqual(invalid_result, [])
+
     def test_touch_is_not_approach_alert(self):
         with patch("crypto_setup_analyzer.rebound_scanner._levels", return_value=[("PDL", 100.0, "Дневные")]):
             result = scan_symbol(object(), "TESTUSDT", current_price=100.0)
@@ -63,6 +98,94 @@ class ReboundScannerTests(unittest.TestCase):
         scanner._handle_price("TESTUSDT", 100.0)
         self.assertEqual(signals, [])
 
+    def test_websocket_suppresses_support_alert_below_level(self):
+        signals = []
+        scanner = ReboundScanner(lambda message: None, signals.append)
+        scanner._symbols = ["TESTUSDT"]
+        scanner._levels_cache["TESTUSDT"] = [("PDL", 100.0, "Предыдущий день")]
+        scanner._handle_price("TESTUSDT", 99.7)
+        self.assertEqual(signals, [])
+
+    def test_websocket_suppresses_resistance_alert_above_level(self):
+        signals = []
+        scanner = ReboundScanner(lambda message: None, signals.append)
+        scanner._symbols = ["TESTUSDT"]
+        scanner._levels_cache["TESTUSDT"] = [("PDH", 100.0, "Предыдущий день")]
+        scanner._handle_price("TESTUSDT", 100.3)
+        self.assertEqual(signals, [])
+
+
+    def test_moving_today_high_and_low_do_not_repeat_approach_alerts(self):
+        scenarios = (
+            ("Today High", (100.0, 100.1, 100.2, 100.3), 99.7),
+            ("Today Low", (100.0, 99.9, 99.8, 99.7), 100.3),
+        )
+        for level_name, moving_levels, price in scenarios:
+            with self.subTest(level_name=level_name):
+                signals = []
+                scanner = ReboundScanner(lambda message: None, signals.append)
+                scanner._symbols = ["TESTUSDT"]
+
+                # Binance обновляет дневной экстремум, но это тот же уровень дня.
+                for moving_level in moving_levels:
+                    scanner._levels_cache["TESTUSDT"] = [
+                        (level_name, moving_level, "Текущий день")
+                    ]
+                    scanner._handle_price("TESTUSDT", price)
+
+                self.assertEqual(len(signals), 1)
+                self.assertEqual(len(scanner._active_alerts), 1)
+                self.assertEqual(len(scanner._approach_started), 1)
+
+    def test_period_rollover_prunes_all_old_level_state(self):
+        from datetime import datetime, timezone
+
+        scanner = ReboundScanner(lambda message: None, lambda signal: None)
+        old_key = scanner._alert_key(
+            "TESTUSDT", "Today High", datetime(2026, 11, 9, 12, tzinfo=timezone.utc)
+        )
+        new_key = scanner._alert_key(
+            "TESTUSDT", "Today High", datetime(2026, 11, 10, 12, tzinfo=timezone.utc)
+        )
+        scanner._active_alerts.add(old_key)
+        scanner._approach_started[old_key] = 123.0
+        scanner._last_confirmed_candle[old_key] = 456
+        scanner._confirmed_alerts.add(old_key)
+
+        scanner._prune_level_state("TESTUSDT", "Today High", new_key)
+
+        self.assertNotIn(old_key, scanner._active_alerts)
+        self.assertNotIn(old_key, scanner._approach_started)
+        self.assertNotIn(old_key, scanner._last_confirmed_candle)
+        self.assertNotIn(old_key, scanner._confirmed_alerts)
+
+    def test_alert_can_repeat_after_price_leaves_hysteresis_zone(self):
+        signals = []
+        scanner = ReboundScanner(lambda message: None, signals.append)
+        scanner._symbols = ["TESTUSDT"]
+        scanner._levels_cache["TESTUSDT"] = [
+            ("Today High", 100.0, "Текущий день")
+        ]
+
+        scanner._handle_price("TESTUSDT", 99.7)
+        scanner._handle_price("TESTUSDT", 100.8)  # дальше 0,7%: сброс блокировки
+        scanner._handle_price("TESTUSDT", 99.7)
+
+        self.assertEqual(len(signals), 2)
+
+    def test_dynamic_level_key_is_stable_within_period_and_rolls_over(self):
+        from datetime import datetime, timezone
+
+        day_1 = datetime(2026, 11, 9, 12, 0, tzinfo=timezone.utc)
+        same_day = datetime(2026, 11, 9, 23, 59, tzinfo=timezone.utc)
+        next_day = datetime(2026, 11, 10, 0, 1, tzinfo=timezone.utc)
+
+        first = ReboundScanner._alert_key("TESTUSDT", "Today High", day_1)
+        same = ReboundScanner._alert_key("TESTUSDT", "Today High", same_day)
+        next_period = ReboundScanner._alert_key("TESTUSDT", "Today High", next_day)
+
+        self.assertEqual(first, same)
+        self.assertNotEqual(first, next_period)
 
     def test_rejection_requires_wick_body_ratio_and_close_position(self):
         scanner = ReboundScanner(lambda message: None, lambda signal: None)

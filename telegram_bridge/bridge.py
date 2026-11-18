@@ -10,6 +10,15 @@ if getattr(sys, "frozen", False):
     BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(sys.executable), ".."))
 else:
     BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+# Корень проекта добавляется в sys.path, чтобы Observer работал и в EXE-сборке.
+if BASE_DIR not in sys.path:
+    sys.path.insert(0, BASE_DIR)
+
+try:
+    from observer.storage import archive_delivery
+except Exception:
+    archive_delivery = None
+
 QUEUE_DIR = os.path.join(BASE_DIR, "telegram_queue")
 LOG_FILE = os.path.join(BASE_DIR, "telegram_bridge_log.txt")
 POLL_SECONDS = 1.0
@@ -141,6 +150,21 @@ def process_file(path, token, default_channel):
             data = json.loads(response.read().decode("utf-8", errors="replace"))
         if not data.get("ok"):
             raise RuntimeError(data.get("description", "Telegram API error"))
+
+        # Архивируем только после подтверждённой доставки. Ошибка Observer
+        # не должна приводить к повторной отправке уже доставленного сообщения.
+        if archive_delivery is not None:
+            try:
+                added = archive_delivery(BASE_DIR, item, data, sent_at=time.time())
+                if added:
+                    log(f"[OBSERVER SAVED] kind={item.get('kind', 'message')} id={msg_id}")
+                else:
+                    log(f"[OBSERVER DUPLICATE] id={msg_id}")
+            except Exception as observer_exc:
+                log(f"[OBSERVER ERROR] id={msg_id}: {observer_exc}")
+        else:
+            log("[OBSERVER WARNING] observer.storage не загружен; событие не архивировано")
+
         os.remove(path)
         if photo_name:
             try:

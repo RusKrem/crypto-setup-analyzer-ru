@@ -14,3 +14,10 @@ Messages are written into `telegram_queue`. Files are removed only after Telegra
 
 ## Diagnostics
 Log: `telegram_bridge_log.txt` in the project root. DNS, TCP/443 and Bot API `getMe` are checked separately. This package has not been tested against your hide.me installation; confirm the API OK line and a real channel post.
+
+
+## Reversal Lab Observer
+
+После добавления Observer пересобери Bridge: закрой уже работающий `TelegramBridge.exe` и запусти `telegram_bridge\REBUILD_TELEGRAM_BRIDGE.bat`. Сборка включает локальный модуль `observer.storage`. Затем запускай Bridge обычным способом. После первой успешной отправки в корне проекта появится `observer_data\observer_events.sqlite3` и папка `observer_data\media` с копиями карточек.
+
+Для просмотра отчёта за последние 24 часа запусти `observer\START_OBSERVER_REPORT.bat`. Важно: старый EXE не содержит Observer, пока его не пересобрали. На работу сканера, условия сигналов и доставку уведомлений Observer не влияет.
