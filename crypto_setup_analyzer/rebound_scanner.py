@@ -225,6 +225,7 @@ class ReboundScanner:
         self._levels_cache = {}
         self._levels_cache_time = {}
         self._last_ws_price_at = {}
+        self._last_ws_event_time = {}
         self._lock = threading.RLock()
 
     @property
@@ -266,6 +267,7 @@ class ReboundScanner:
                             self._levels_cache = {s: v for s, v in self._levels_cache.items() if s in symbols}
                             self._levels_cache_time = {s: v for s, v in self._levels_cache_time.items() if s in symbols}
                             self._last_ws_price_at = {s: v for s, v in self._last_ws_price_at.items() if s in symbols}
+                            self._last_ws_event_time = {s: v for s, v in self._last_ws_event_time.items() if s in symbols}
                             self._active_alerts = {k for k in self._active_alerts if k[0] in symbols}
                         self.on_symbols(len(symbols))
                     with self._lock:
@@ -294,11 +296,17 @@ class ReboundScanner:
                             response = session.get(f"{BASE_URL}/fapi/v1/ticker/price", timeout=12)
                             response.raise_for_status()
                             ticker_prices = response.json()
-                            prices = {
-                                item.get("symbol"): float(item.get("price", 0))
-                                for item in ticker_prices
-                                if item.get("symbol") in symbols
-                            }
+                            prices = {}
+                            for item in ticker_prices:
+                                symbol = item.get("symbol")
+                                if symbol not in symbols:
+                                    continue
+                                try:
+                                    price = float(item.get("price", 0))
+                                except (TypeError, ValueError):
+                                    continue
+                                if math.isfinite(price) and price > 0:
+                                    prices[symbol] = price
                             updated = 0
                             for symbol, price in prices.items():
                                 if price > 0:
@@ -349,7 +357,7 @@ class ReboundScanner:
             for key in stale_keys:
                 mapping.pop(key, None)
 
-    def _handle_price(self, symbol, price, source="websocket"):
+    def _handle_price(self, symbol, price, source="websocket", event_time_ms=None):
         """Обрабатывает цену; REST не перезаписывает свежие данные WebSocket."""
         now = time.time()
         with self._lock:
@@ -358,9 +366,13 @@ class ReboundScanner:
             if source == "rest" and now - self._last_ws_price_at.get(symbol, 0.0) < 15:
                 return
             if source == "websocket":
+                event_time = int(event_time_ms) if event_time_ms is not None else int(now * 1000)
+                if event_time < self._last_ws_event_time.get(symbol, 0):
+                    return
+                self._last_ws_event_time[symbol] = event_time
                 self._last_ws_price_at[symbol] = now
             levels = list(self._levels_cache.get(symbol, []))
-        if not levels or price <= 0:
+        if not levels or not math.isfinite(float(price)) or price <= 0:
             return
         now = time.time()
         active_now = set()
@@ -517,7 +529,7 @@ class ReboundScanner:
                             symbol = item.get("s")
                             if symbol in tracked:
                                 # Поле c в !ticker@arr содержит последнюю цену.
-                                self._handle_price(symbol, float(item.get("c", 0)), source="websocket")
+                                self._handle_price(symbol, float(item.get("c", 0)), source="websocket", event_time_ms=item.get("E"))
                     except Exception as exc:
                         self.on_status(f"Ошибка обработки WebSocket: {str(exc)[:100]}")
 
