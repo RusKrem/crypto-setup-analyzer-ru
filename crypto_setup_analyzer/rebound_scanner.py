@@ -381,6 +381,12 @@ class ReboundScanner:
         if not levels:
             return
         now = time.time()
+        # Для WebSocket используем время события Binance, а не часы локального ПК.
+        # REST fallback не содержит event time, поэтому для него остаётся время получения.
+        try:
+            event_time = int(event_time_ms) if source == "websocket" and event_time_ms is not None else int(now * 1000)
+        except (TypeError, ValueError, OverflowError):
+            event_time = int(now * 1000)
         active_now = set()
         for name, level, group in levels:
             if level <= 0:
@@ -391,7 +397,7 @@ class ReboundScanner:
             in_zone = correct_side and 0 < distance <= self.alert_distance_pct
             update = {"symbol": symbol, "level_name": name, "level_group": group,
                       "direction": direction, "level": level, "price": price,
-                      "distance_pct": distance, "time": int(now * 1000),
+                      "distance_pct": distance, "time": event_time,
                       "in_zone": in_zone, "correct_side": correct_side}
             self.on_price_update(update)
             alert_key = self._alert_key(symbol, name)
