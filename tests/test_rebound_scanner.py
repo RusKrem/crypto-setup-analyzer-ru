@@ -245,5 +245,31 @@ class ReboundScannerTests(unittest.TestCase):
         self.assertEqual(len(scanner._approach_started), 1)
 
 
+
+    def test_confirmation_rejects_candle_closed_before_approach(self):
+        scanner = ReboundScanner(lambda message: None, lambda signal: None)
+        self.assertFalse(scanner._is_confirmation_fresh(
+            close_time_ms=1_000_000,
+            approach_started=1001.0,
+            now=1002.0,
+        ))
+
+    def test_confirmation_accepts_candle_closed_after_approach_within_window(self):
+        scanner = ReboundScanner(lambda message: None, lambda signal: None)
+        self.assertTrue(scanner._is_confirmation_fresh(
+            close_time_ms=1_002_000,
+            approach_started=1001.0,
+            now=1003.0,
+        ))
+
+    def test_confirmation_rejects_approach_older_than_five_minutes(self):
+        scanner = ReboundScanner(lambda message: None, lambda signal: None)
+        self.assertFalse(scanner._is_confirmation_fresh(
+            close_time_ms=1_400_000,
+            approach_started=1000.0,
+            now=1301.0,
+        ))
+
+
 if __name__ == "__main__":
     unittest.main()
