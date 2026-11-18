@@ -79,7 +79,8 @@ class ReboundScannerTests(unittest.TestCase):
             with patch.object(module.time, "time", return_value=1063.0):
                 result = scanner._claim_confirmation(key, candle, 100.0, "SHORT")
             self.assertIsNotNone(result)
-            restored = ReboundScanner(lambda message: None, lambda signal: None, state_path=state_path)
+            with patch.object(module.time, "time", return_value=1063.0):
+                restored = ReboundScanner(lambda message: None, lambda signal: None, state_path=state_path)
             restored_key = restored._alert_key("TESTUSDT", "PDH")
             self.assertIn(restored_key, restored._confirmed_alerts)
             self.assertEqual(restored._last_confirmed_candle[restored_key], int(candle[6]))
