@@ -3,6 +3,26 @@ from unittest.mock import patch
 from crypto_setup_analyzer.rebound_scanner import (scan_symbol, ReboundScanner, ALERT_DISTANCE_PCT, _validate_klines)
 
 class ReboundScannerTests(unittest.TestCase):
+    def test_websocket_event_time_is_preserved_in_price_update_and_alert(self):
+        updates = []
+        alerts = []
+        scanner = ReboundScanner(
+            on_status=lambda message: None,
+            on_signal=alerts.append,
+            on_price_update=updates.append,
+        )
+        scanner._symbols = ["TESTUSDT"]
+        scanner._levels_cache["TESTUSDT"] = [("PDL", 100.0, "Предыдущий день")]
+        exchange_event_time = 1_800_000_123_456
+
+        scanner._handle_price(
+            "TESTUSDT", 100.3, source="websocket",
+            event_time_ms=exchange_event_time,
+        )
+
+        self.assertEqual(updates[0]["time"], exchange_event_time)
+        self.assertEqual(alerts[0]["time"], exchange_event_time)
+
     def test_warns_when_price_is_approaching_level(self):
         with patch("crypto_setup_analyzer.rebound_scanner._levels", return_value=[("PDL", 100.0, "Дневные")]):
             result = scan_symbol(object(), "TESTUSDT", current_price=100.3)
