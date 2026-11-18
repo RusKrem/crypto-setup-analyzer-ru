@@ -656,5 +656,48 @@ class ReboundScannerTests(unittest.TestCase):
         self.assertTrue(scanner._stop.is_set())
 
 
+    def test_start_does_not_duplicate_threads_and_allows_restart_after_exit(self):
+        import threading
+
+        statuses = []
+        entered = threading.Event()
+        release = threading.Event()
+        count_lock = threading.Lock()
+        started = []
+
+        scanner = ReboundScanner(statuses.append, lambda signal: None)
+
+        def worker():
+            with count_lock:
+                started.append(threading.current_thread().name)
+                if len(started) >= 3:
+                    entered.set()
+            release.wait(2)
+
+        scanner._run = worker
+        scanner._ws_loop = worker
+        scanner._confirmation_loop = worker
+
+        scanner.start()
+        self.assertTrue(entered.wait(1))
+        first_threads = (scanner._thread, scanner._ws_thread, scanner._confirmation_thread)
+        scanner.start()
+        self.assertEqual(len(started), 3)
+        self.assertTrue(any("ещё завершает предыдущий запуск" in item for item in statuses))
+
+        scanner.stop()
+        release.set()
+        for thread in first_threads:
+            thread.join(1)
+        self.assertFalse(scanner.running)
+
+        scanner.start()
+        second_threads = (scanner._thread, scanner._ws_thread, scanner._confirmation_thread)
+        for thread in second_threads:
+            thread.join(1)
+        self.assertEqual(len(started), 6)
+        self.assertFalse(scanner.running)
+
+
 if __name__ == "__main__":
     unittest.main()
