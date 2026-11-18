@@ -378,6 +378,16 @@ class ReboundScanner:
                 self._approach_started.pop(key, None)
 
     @staticmethod
+    def _is_confirmation_fresh(close_time_ms: int, approach_started: float | None,
+                               now: float | None = None) -> bool:
+        """Свеча должна закрыться после начала текущего подхода и не старше 5 минут."""
+        if approach_started is None:
+            return False
+        now = time.time() if now is None else float(now)
+        candle_closed_at = int(close_time_ms) / 1000.0
+        return candle_closed_at >= float(approach_started) and 0 <= now - float(approach_started) <= 300
+
+    @staticmethod
     def evaluate_rejection(candle, level, direction):
         """Проверяет выраженное отвержение закрытой свечой; возвращает метрики или None."""
         o, h, low, close = map(float, (candle[1], candle[2], candle[3], candle[4]))
@@ -433,7 +443,8 @@ class ReboundScanner:
                                 continue
                             with self._lock:
                                 started = self._approach_started.get(key)
-                                if key in self._confirmed_alerts or started is None or time.time() - started > 300:
+                                if (key in self._confirmed_alerts
+                                        or not self._is_confirmation_fresh(close_time, started)):
                                     continue
                                 self._confirmed_alerts.add(key)
                             close = float(closed[4])
