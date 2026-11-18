@@ -203,5 +203,47 @@ class ReboundScannerTests(unittest.TestCase):
         self.assertIsNotNone(result)
         self.assertGreaterEqual(result["close_position"], 0.65)
 
+
+    def test_crossing_level_cancels_active_approach_immediately(self):
+        signals = []
+        scanner = ReboundScanner(lambda message: None, signals.append)
+        scanner._symbols = ["TESTUSDT"]
+        scanner._levels_cache["TESTUSDT"] = [
+            ("Today High", 100.0, "Текущий день")
+        ]
+
+        scanner._handle_price("TESTUSDT", 99.7)
+        self.assertEqual(len(signals), 1)
+        self.assertEqual(len(scanner._active_alerts), 1)
+        self.assertEqual(len(scanner._approach_started), 1)
+
+        # Цена пересекла сопротивление. Гистерезис не должен удерживать
+        # старое предупреждение на неправильной стороне уровня.
+        scanner._handle_price("TESTUSDT", 100.2)
+        self.assertEqual(len(scanner._active_alerts), 0)
+        self.assertEqual(len(scanner._approach_started), 0)
+
+    def test_leaving_hysteresis_zone_clears_approach_timer(self):
+        signals = []
+        scanner = ReboundScanner(lambda message: None, signals.append)
+        scanner._symbols = ["TESTUSDT"]
+        scanner._levels_cache["TESTUSDT"] = [
+            ("PDL", 100.0, "Предыдущий день")
+        ]
+
+        scanner._handle_price("TESTUSDT", 100.3)
+        self.assertEqual(len(scanner._approach_started), 1)
+
+        # Выход за 0,7% завершает попытку подхода и очищает её таймер.
+        scanner._handle_price("TESTUSDT", 100.8)
+        self.assertEqual(len(scanner._active_alerts), 0)
+        self.assertEqual(len(scanner._approach_started), 0)
+
+        # Новый подход должен получить новый таймер и новое событие.
+        scanner._handle_price("TESTUSDT", 100.3)
+        self.assertEqual(len(signals), 2)
+        self.assertEqual(len(scanner._approach_started), 1)
+
+
 if __name__ == "__main__":
     unittest.main()
