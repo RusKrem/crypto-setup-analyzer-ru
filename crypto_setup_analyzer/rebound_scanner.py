@@ -228,6 +228,7 @@ class ReboundScanner:
         self._last_ws_price_at = {}
         self._last_ws_event_time = {}
         self._lock = threading.RLock()
+        self._lifecycle_lock = threading.Lock()
         self._state_path = Path(state_path) if state_path else None
         self._load_persisted_state()
 
@@ -237,14 +238,19 @@ class ReboundScanner:
             return
         try:
             data = json.loads(self._state_path.read_text(encoding="utf-8"))
+            if not isinstance(data, dict) or not isinstance(data.get("active", []), list):
+                return
             now = time.time()
             for entry in data.get("active", []):
+                if not isinstance(entry, dict):
+                    continue
                 key_data = entry.get("key", [])
-                if len(key_data) != 3 or not isinstance(key_data[2], list):
+                if (not isinstance(key_data, list) or len(key_data) != 3
+                        or not isinstance(key_data[2], list)):
                     continue
                 key = (str(key_data[0]), str(key_data[1]), tuple(key_data[2]))
                 started = float(entry["started"])
-                if not 0 <= now - started <= 300:
+                if not math.isfinite(started) or not 0 <= now - started <= 300:
                     continue
                 self._active_alerts.add(key)
                 self._approach_started[key] = started
@@ -283,10 +289,16 @@ class ReboundScanner:
 
     @property
     def running(self):
-        return self._thread is not None and self._thread.is_alive()
+        return any(
+            thread is not None and thread.is_alive()
+            for thread in (self._thread, self._ws_thread, self._confirmation_thread)
+        )
 
     def start(self):
-        if not self.running:
+        with self._lifecycle_lock:
+            if self.running:
+                self.on_status("Сканер ещё завершает предыдущий запуск. Повторите запуск через несколько секунд.")
+                return
             self._stop.clear()
             self._thread = threading.Thread(target=self._run, daemon=True)
             self._ws_thread = threading.Thread(target=self._ws_loop, daemon=True)
@@ -297,6 +309,9 @@ class ReboundScanner:
 
     def stop(self):
         self._stop.set()
+        # Фиксируем состояние даже если цена давно не обновлялась.
+        with self._lock:
+            self._persist_state_locked()
         app = self._ws_app
         if app is not None:
             try:
