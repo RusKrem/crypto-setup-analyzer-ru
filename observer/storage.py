@@ -6,11 +6,13 @@
 from __future__ import annotations
 
 import json
+import hashlib
 from contextlib import closing
 import re
 import shutil
 import sqlite3
 import time
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -179,30 +181,46 @@ def archive_delivery(
             except ValueError:
                 source = None
             if source and source.is_file():
-                safe_id = re.sub(r"[^A-Za-z0-9_-]", "_", queue_id)[:80] or "event"
+                # Хеш queue_id исключает коллизии после очистки небезопасных символов.
+                safe_id = hashlib.sha256(queue_id.encode("utf-8")).hexdigest()[:20]
                 target_name = f"{int(event['sent_at'] * 1000)}_{safe_id}{source.suffix.lower()}"
                 target = media_dir / target_name
-                if not target.exists():
-                    shutil.copy2(source, target)
+                # Копируем атомарно: Observer/отчёт не увидит частично записанный PNG.
+                with tempfile.NamedTemporaryFile(
+                    prefix=f".{safe_id}_", suffix=".tmp", dir=media_dir, delete=False
+                ) as temporary:
+                    temporary_path = Path(temporary.name)
+                try:
+                    shutil.copy2(source, temporary_path)
+                    temporary_path.replace(target)
+                finally:
+                    temporary_path.unlink(missing_ok=True)
                 media_relative = str(Path("media") / target_name)
 
-        conn.execute(
-            """INSERT INTO events (
-                queue_id, kind, symbol, direction, level_name, level_price,
-                price, distance_pct, wick_body_ratio, close_position,
-                raw_text, created_at, sent_at, telegram_chat_id,
-                telegram_message_id, media_path, metadata_json
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (
-                event["queue_id"], event["kind"], event["symbol"], event["direction"],
-                event["level_name"], event["level_price"], event["price"],
-                event["distance_pct"], event["wick_body_ratio"], event["close_position"],
-                event["raw_text"], event["created_at"], event["sent_at"],
-                str(chat.get("id")) if chat.get("id") is not None else None,
-                str(msg_data.get("message_id")) if msg_data.get("message_id") is not None else None,
-                media_relative,
-                json.dumps(event["metadata"], ensure_ascii=False, default=str),
-            ),
-        )
-        conn.commit()
+        try:
+            conn.execute(
+                """INSERT INTO events (
+                    queue_id, kind, symbol, direction, level_name, level_price,
+                    price, distance_pct, wick_body_ratio, close_position,
+                    raw_text, created_at, sent_at, telegram_chat_id,
+                    telegram_message_id, media_path, metadata_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    event["queue_id"], event["kind"], event["symbol"], event["direction"],
+                    event["level_name"], event["level_price"], event["price"],
+                    event["distance_pct"], event["wick_body_ratio"], event["close_position"],
+                    event["raw_text"], event["created_at"], event["sent_at"],
+                    str(chat.get("id")) if chat.get("id") is not None else None,
+                    str(msg_data.get("message_id")) if msg_data.get("message_id") is not None else None,
+                    media_relative,
+                    json.dumps(event["metadata"], ensure_ascii=False, default=str),
+                ),
+            )
+            conn.commit()
+        except Exception:
+            # Файловая система не участвует в SQLite-транзакции. Не оставляем
+            # сиротскую копию карточки, если запись события не зафиксировалась.
+            if media_relative:
+                (archive_dir / media_relative).unlink(missing_ok=True)
+            raise
     return True
