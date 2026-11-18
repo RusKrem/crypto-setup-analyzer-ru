@@ -134,7 +134,7 @@ class BridgeObserverIntegrationTests(unittest.TestCase):
                  patch.object(bridge, "LOG_FILE", str(base / "bridge.log")):
                 bridge.process_file(str(message), "123:token", "@test_channel")
             self.assertFalse(message.exists())
-            quarantined = list((queue / "failed").glob("broken.json"))
+            quarantined = list((queue / "failed").glob("*_broken.json"))
             self.assertEqual(len(quarantined), 1)
             self.assertIn("invalid json", quarantined[0].read_text(encoding="utf-8"))
 
