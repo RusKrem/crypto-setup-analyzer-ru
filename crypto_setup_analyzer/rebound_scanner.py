@@ -350,7 +350,9 @@ class ReboundScanner:
                 self._prune_level_state(symbol, name, alert_key)
                 was_active = alert_key in self._active_alerts
                 is_new = False
-                if was_active and distance <= 0.7:
+                # Гистерезис действует только пока цена остаётся на ожидаемой
+                # стороне уровня. Пересечение уровня немедленно завершает подход.
+                if was_active and correct_side and distance <= 0.7:
                     active_now.add(alert_key)
                 elif in_zone and not was_active:
                     self._active_alerts.add(alert_key)
@@ -369,6 +371,11 @@ class ReboundScanner:
         with self._lock:
             expired = {k for k in self._active_alerts if k[0] == symbol and k not in active_now}
             self._active_alerts.difference_update(expired)
+            # Не допускаем подтверждения по таймеру уже завершившегося подхода.
+            # Последнюю проверенную свечу сохраняем, чтобы не переоценить её
+            # при повторном входе в зону в пределах той же минуты.
+            for key in expired:
+                self._approach_started.pop(key, None)
 
     @staticmethod
     def evaluate_rejection(candle, level, direction):
