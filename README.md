@@ -132,3 +132,4 @@ This repository demonstrates Python application development, API integration, We
 - [PATCH 11: Telegram delivery pipeline hardening](PATCH_11_DELIVERY_PIPELINE_RU.md)
 - [PATCH 12: Scanner lifecycle and state recovery](PATCH_12_SCANNER_LIFECYCLE_RU.md)
 - [PATCH 13: Telegram → Observer end-to-end delivery hardening](PATCH_13_TELEGRAM_OBSERVER_E2E_RU.md)
+- [PATCH 14: Telegram delivery safety and single-instance lock](PATCH_14_TELEGRAM_DELIVERY_SAFETY_RU.md)
