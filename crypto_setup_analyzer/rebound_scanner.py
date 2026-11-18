@@ -471,6 +471,34 @@ class ReboundScanner:
         return {"wick_body_ratio": ratio, "close_position": close_position,
                 "candle_open": o, "candle_high": h, "candle_low": low, "candle_close": close}
 
+    def _claim_confirmation(self, key, candle, level, direction, now=None):
+        """Атомарно проверяет активный цикл и захватывает одну свечу для подтверждения."""
+        close_time = int(candle[6])
+        with self._lock:
+            if key not in self._active_alerts:
+                return None
+            if self._last_confirmed_candle.get(key) == close_time:
+                return None
+            self._last_confirmed_candle[key] = close_time
+            started = self._approach_started.get(key)
+            if (key in self._confirmed_alerts
+                    or not self._is_confirmation_fresh(
+                        close_time, started, now=now, open_time_ms=int(candle[0])
+                    )):
+                return None
+            metrics = self.evaluate_rejection(candle, level, direction)
+            if not metrics:
+                return None
+            self._confirmed_alerts.add(key)
+            return metrics
+
+    def _release_confirmation_claim(self, key, close_time):
+        """Разрешает повторную попытку, если обработчик не смог принять событие."""
+        with self._lock:
+            self._confirmed_alerts.discard(key)
+            if self._last_confirmed_candle.get(key) == close_time:
+                self._last_confirmed_candle.pop(key, None)
+
     def _confirmation_loop(self):
         """Проверяет только завершённые 1m-свечи и публикует подтверждённые реакции."""
         with requests.Session() as session:
@@ -494,20 +522,11 @@ class ReboundScanner:
                             key = self._alert_key(symbol, name)
                             with self._lock:
                                 self._prune_level_state(symbol, name, key)
-                                if self._last_confirmed_candle.get(key) == close_time:
-                                    continue
-                                self._last_confirmed_candle[key] = close_time
-                            metrics = self.evaluate_rejection(closed, level, direction)
+                            metrics = self._claim_confirmation(
+                                key, closed, level, direction
+                            )
                             if not metrics:
                                 continue
-                            with self._lock:
-                                started = self._approach_started.get(key)
-                                if (key in self._confirmed_alerts
-                                        or not self._is_confirmation_fresh(
-                                            close_time, started, open_time_ms=int(closed[0])
-                                        )):
-                                    continue
-                                self._confirmed_alerts.add(key)
                             close = float(closed[4])
                             distance = abs(close - level) / level * 100 if level else 0
                             event = {"symbol": symbol, "level_name": name, "level_group": group,
@@ -515,7 +534,11 @@ class ReboundScanner:
                                 "time": close_time, "candle_open_time": int(closed[0]),
                                 "direction": direction, "candles": candles[:-1],
                                 "details": "Выраженное отвержение уровня на закрытой минутной свече", **metrics}
-                            self.on_confirmation(event)
+                            try:
+                                self.on_confirmation(event)
+                            except Exception:
+                                self._release_confirmation_claim(key, close_time)
+                                raise
                     except Exception as exc:
                         self.on_status(f"Проверка реакции {symbol}: {str(exc)[:90]}")
                 self._stop.wait(12)
