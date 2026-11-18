@@ -96,6 +96,66 @@ def iter_messages():
     return [os.path.join(QUEUE_DIR, n) for n in sorted(os.listdir(QUEUE_DIR)) if n.endswith(".json")]
 
 
+def _save_queue_item(path, item):
+    """Атомарно сохраняет состояние очереди, не оставляя частичный JSON."""
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(item, f, ensure_ascii=False, indent=2)
+    os.replace(tmp, path)
+
+
+def _validated_photo_path(photo_name):
+    """Возвращает реальный путь только к файлу внутри telegram_queue."""
+    from pathlib import Path
+
+    queue_root = Path(QUEUE_DIR).resolve()
+    photo_path = Path(str(photo_name)).resolve()
+    try:
+        photo_path.relative_to(queue_root)
+    except ValueError:
+        raise RuntimeError("Photo file missing or outside telegram_queue")
+    if not photo_path.is_file():
+        raise RuntimeError("Photo file missing or outside telegram_queue")
+    return str(photo_path)
+
+
+def _finish_archived_delivery(path, item):
+    """Повторяет только локальную архивацию уже отправленного сообщения."""
+    msg_id = item.get("id", os.path.basename(path))
+    if archive_delivery is None:
+        log(f"[OBSERVER PENDING] id={msg_id}: observer.storage не загружен; Telegram повторно не отправляется")
+        return False
+    try:
+        added = archive_delivery(
+            BASE_DIR,
+            item,
+            item.get("telegram_result"),
+            sent_at=item.get("sent_ts"),
+        )
+    except Exception as exc:
+        log(f"[OBSERVER RETRY] id={msg_id}: {exc}")
+        return False
+
+    if added:
+        log(f"[OBSERVER SAVED] kind={item.get('kind', 'message')} id={msg_id}")
+    else:
+        log(f"[OBSERVER DUPLICATE] id={msg_id}")
+
+    photo_name = item.get("photo_path")
+    if photo_name:
+        try:
+            photo_path = _validated_photo_path(photo_name)
+            os.remove(photo_path)
+        except (OSError, RuntimeError):
+            pass
+    try:
+        os.remove(path)
+    except FileNotFoundError:
+        pass
+    log(f"[TELEGRAM SENT] {item.get('kind', 'message')} id={msg_id}")
+    return True
+
+
 def process_file(path, token, default_channel):
     try:
         with open(path, "r", encoding="utf-8-sig") as f:
@@ -103,6 +163,12 @@ def process_file(path, token, default_channel):
     except Exception as exc:
         log(f"[BRIDGE ERROR] Cannot read {os.path.basename(path)}: {exc}")
         return
+    # Если Telegram уже подтвердил доставку, повторяем только архивирование.
+    # TTL и отправка здесь больше не применяются.
+    if item.get("telegram_sent"):
+        _finish_archived_delivery(path, item)
+        return
+
     now = time.time()
     created = float(item.get("created_ts", now) or now)
     ttl = item.get("ttl_seconds")
@@ -125,10 +191,7 @@ def process_file(path, token, default_channel):
         photo_name = item.get("photo_path")
         if photo_name:
             # Фотографии разрешены только из локальной очереди приложения.
-            photo_path = os.path.abspath(photo_name)
-            queue_root = os.path.abspath(QUEUE_DIR) + os.sep
-            if not photo_path.startswith(queue_root) or not os.path.isfile(photo_path):
-                raise RuntimeError("Photo file missing or outside telegram_queue")
+            photo_path = _validated_photo_path(photo_name)
             boundary = "----ReversalLab" + str(int(time.time() * 1000))
             chunks = []
             def field(name, value):
@@ -151,38 +214,26 @@ def process_file(path, token, default_channel):
         if not data.get("ok"):
             raise RuntimeError(data.get("description", "Telegram API error"))
 
-        # Архивируем только после подтверждённой доставки. Ошибка Observer
-        # не должна приводить к повторной отправке уже доставленного сообщения.
-        if archive_delivery is not None:
-            try:
-                added = archive_delivery(BASE_DIR, item, data, sent_at=time.time())
-                if added:
-                    log(f"[OBSERVER SAVED] kind={item.get('kind', 'message')} id={msg_id}")
-                else:
-                    log(f"[OBSERVER DUPLICATE] id={msg_id}")
-            except Exception as observer_exc:
-                log(f"[OBSERVER ERROR] id={msg_id}: {observer_exc}")
-        else:
-            log("[OBSERVER WARNING] observer.storage не загружен; событие не архивировано")
+        # Сначала фиксируем подтверждённую Telegram доставку в очереди.
+        # При сбое SQLite следующий проход повторит архивирование, а не отправку.
+        item["telegram_sent"] = True
+        item["telegram_result"] = data
+        item["sent_ts"] = time.time()
+        try:
+            _save_queue_item(path, item)
+        except Exception as state_exc:
+            log(f"[CRITICAL] Telegram accepted id={msg_id}, but delivery state could not be persisted: {state_exc}")
+            return
 
-        os.remove(path)
-        if photo_name:
-            try:
-                os.remove(photo_path)
-            except OSError:
-                pass
-        log(f"[TELEGRAM SENT] {item.get('kind', 'message')} id={msg_id}")
+        _finish_archived_delivery(path, item)
     except Exception as exc:
         attempts += 1
         delay = min(300, max(5, 2 ** min(attempts, 8)))
         item["attempts"] = attempts
         item["last_error"] = str(exc)
         item["next_attempt_ts"] = time.time() + delay
-        tmp = path + ".tmp"
         try:
-            with open(tmp, "w", encoding="utf-8") as f:
-                json.dump(item, f, ensure_ascii=False, indent=2)
-            os.replace(tmp, path)
+            _save_queue_item(path, item)
         except Exception:
             pass
         log(f"[TELEGRAM RETRY] id={msg_id} attempt={attempts} next={delay}s error={exc}")
