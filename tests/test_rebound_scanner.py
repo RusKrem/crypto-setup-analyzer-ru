@@ -547,5 +547,76 @@ class ReboundScannerTests(unittest.TestCase):
         ))
 
 
+    def test_orphan_temporary_state_file_is_removed_on_startup(self):
+        import tempfile
+        from pathlib import Path
+
+        with tempfile.TemporaryDirectory() as folder:
+            state_path = Path(folder) / "scanner_state.json"
+            temporary = state_path.with_suffix(".json.tmp")
+            temporary.write_text('{"partial":', encoding="utf-8")
+            ReboundScanner(lambda message: None, lambda signal: None, state_path=state_path)
+            self.assertFalse(temporary.exists())
+
+    def test_failed_state_replace_cleans_temporary_file_and_reports_error(self):
+        import tempfile
+        from pathlib import Path
+
+        with tempfile.TemporaryDirectory() as folder:
+            state_path = Path(folder) / "scanner_state.json"
+            statuses = []
+            scanner = ReboundScanner(statuses.append, lambda signal: None, state_path=state_path)
+            key = scanner._alert_key("TESTUSDT", "PDL")
+            scanner._active_alerts.add(key)
+            scanner._approach_started[key] = 1000.0
+            temporary = state_path.with_suffix(".json.tmp")
+            with patch.object(Path, "replace", side_effect=OSError("simulated replace failure")):
+                with scanner._lock:
+                    scanner._persist_state_locked()
+            self.assertFalse(temporary.exists())
+            self.assertTrue(any("Не удалось сохранить состояние" in item for item in statuses))
+
+    def test_invalid_persisted_entries_are_skipped_individually(self):
+        import json
+        import tempfile
+        from pathlib import Path
+        from crypto_setup_analyzer import rebound_scanner as module
+
+        with tempfile.TemporaryDirectory() as folder:
+            state_path = Path(folder) / "scanner_state.json"
+            valid = {
+                "key": ["TESTUSDT", "PDL", ["day", "2026-11-18"]],
+                "started": 1000.0,
+                "last_confirmed_candle": 999000,
+                "confirmed": True,
+            }
+            state_path.write_text(json.dumps({
+                "version": 1,
+                "active": [valid, {"key": ["", "PDL", ["day", "2026-11-18"]], "started": 1000}],
+            }), encoding="utf-8")
+            with patch.object(module.time, "time", return_value=1001.0):
+                scanner = ReboundScanner(lambda message: None, lambda signal: None, state_path=state_path)
+            key = ("TESTUSDT", "PDL", ("day", "2026-11-18"))
+            self.assertEqual(scanner._active_alerts, {key})
+            self.assertIn(key, scanner._confirmed_alerts)
+            self.assertEqual(scanner._last_confirmed_candle[key], 999000)
+
+    def test_pruning_old_level_period_clears_confirmation_state(self):
+        scanner = ReboundScanner(lambda message: None, lambda signal: None)
+        old_key = ("TESTUSDT", "PDL", ("day", "2026-11-17"))
+        current_key = ("TESTUSDT", "PDL", ("day", "2026-11-18"))
+        scanner._active_alerts.add(old_key)
+        scanner._approach_started[old_key] = 1000.0
+        scanner._last_confirmed_candle[old_key] = 999000
+        scanner._confirmed_alerts.add(old_key)
+
+        scanner._prune_level_state("TESTUSDT", "PDL", current_key)
+
+        self.assertNotIn(old_key, scanner._active_alerts)
+        self.assertNotIn(old_key, scanner._approach_started)
+        self.assertNotIn(old_key, scanner._last_confirmed_candle)
+        self.assertNotIn(old_key, scanner._confirmed_alerts)
+
+
 if __name__ == "__main__":
     unittest.main()
