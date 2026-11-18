@@ -3,6 +3,7 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from observer.storage import archive_delivery, parse_notification
 
@@ -74,6 +75,45 @@ class ObserverTests(unittest.TestCase):
             archived = base / "observer_data" / row[4]
             self.assertTrue(archived.exists())
             self.assertEqual(archived.read_bytes(), b"fake-png-bytes")
+
+    def test_media_filename_does_not_collide_after_queue_id_sanitizing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            queue = base / "telegram_queue"
+            queue.mkdir()
+            first = queue / "first.png"
+            second = queue / "second.png"
+            first.write_bytes(b"first-image")
+            second.write_bytes(b"second-image")
+            sent_at = time.time()
+            item_a = {"id": "a/b", "kind": "REACTION_CONFIRMED",
+                      "photo_path": str(first), "text": "A", "created_ts": sent_at}
+            item_b = {"id": "a_b", "kind": "REACTION_CONFIRMED",
+                      "photo_path": str(second), "text": "B", "created_ts": sent_at}
+            self.assertTrue(archive_delivery(base, item_a, sent_at=sent_at))
+            self.assertTrue(archive_delivery(base, item_b, sent_at=sent_at))
+            with sqlite3.connect(base / "observer_data" / "observer_events.sqlite3") as conn:
+                paths = [row[0] for row in conn.execute(
+                    "SELECT media_path FROM events ORDER BY queue_id"
+                )]
+            self.assertNotEqual(paths[0], paths[1])
+            self.assertEqual((base / "observer_data" / paths[0]).read_bytes(), b"first-image")
+            self.assertEqual((base / "observer_data" / paths[1]).read_bytes(), b"second-image")
+
+    def test_failed_database_insert_removes_copied_media(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            queue = base / "telegram_queue"
+            queue.mkdir()
+            photo = queue / "card.png"
+            photo.write_bytes(b"image")
+            item = {"id": "failed-insert", "kind": "REACTION_CONFIRMED",
+                    "photo_path": str(photo), "text": "test", "created_ts": time.time()}
+            with patch("observer.storage.json.dumps", side_effect=RuntimeError("serialize failed")):
+                with self.assertRaises(RuntimeError):
+                    archive_delivery(base, item, sent_at=time.time())
+            media_dir = base / "observer_data" / "media"
+            self.assertEqual(list(media_dir.iterdir()), [])
 
     def test_same_queue_id_is_not_archived_twice(self):
         with tempfile.TemporaryDirectory() as tmp:
