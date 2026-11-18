@@ -146,6 +146,27 @@ class ReboundScannerTests(unittest.TestCase):
         scanner._handle_price("TESTUSDT", 100.3, source="websocket")
         self.assertEqual(len(updates), 1)
 
+    def test_websocket_ignores_out_of_order_tick(self):
+        updates = []
+        scanner = ReboundScanner(lambda message: None, lambda signal: None,
+                                 on_price_update=updates.append)
+        scanner._symbols = ["TESTUSDT"]
+        scanner._levels_cache["TESTUSDT"] = [("PDL", 100.0, "Предыдущий день")]
+        scanner._handle_price("TESTUSDT", 100.3, event_time_ms=2000)
+        scanner._handle_price("TESTUSDT", 99.7, event_time_ms=1000)
+        self.assertEqual(len(updates), 1)
+        self.assertEqual(updates[0]["price"], 100.3)
+
+    def test_non_finite_market_price_is_ignored(self):
+        updates = []
+        scanner = ReboundScanner(lambda message: None, lambda signal: None,
+                                 on_price_update=updates.append)
+        scanner._symbols = ["TESTUSDT"]
+        scanner._levels_cache["TESTUSDT"] = [("PDL", 100.0, "Предыдущий день")]
+        scanner._handle_price("TESTUSDT", float("nan"))
+        scanner._handle_price("TESTUSDT", float("inf"))
+        self.assertEqual(updates, [])
+
     def test_binance_klines_reject_out_of_order_and_invalid_ohlc(self):
         valid = [
             [0, "100", "102", "99", "101", "10", 59999],
