@@ -4,6 +4,7 @@ import socket
 import time
 import urllib.parse
 import urllib.request
+from urllib.error import HTTPError
 import sys
 
 if getattr(sys, "frozen", False):
@@ -26,6 +27,61 @@ REQUEST_TIMEOUT = 12
 HEALTH_INTERVAL = 30
 HOST = "api.telegram.org"
 DEFAULT_TTL_SECONDS = 300
+LOCK_FILE = os.path.join(BASE_DIR, ".telegram_bridge.lock")
+
+class BridgeAlreadyRunning(RuntimeError):
+    """Raised when another Telegram Bridge owns the process lock."""
+
+
+class SingleInstanceLock:
+    """OS-released inter-process lock that works on Windows and POSIX."""
+    def __init__(self, path):
+        self.path = path
+        self._file = None
+
+    def acquire(self):
+        os.makedirs(os.path.dirname(os.path.abspath(self.path)), exist_ok=True)
+        self._file = open(self.path, "a+b")
+        try:
+            self._file.seek(0, os.SEEK_END)
+            if self._file.tell() == 0:
+                self._file.write(b"0")
+                self._file.flush()
+            self._file.seek(0)
+            if os.name == "nt":
+                import msvcrt
+                msvcrt.locking(self._file.fileno(), msvcrt.LK_NBLCK, 1)
+            else:
+                import fcntl
+                fcntl.flock(self._file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except (OSError, BlockingIOError):
+            self._file.close()
+            self._file = None
+            raise BridgeAlreadyRunning("Another Telegram Bridge instance is already running")
+        return self
+
+    def release(self):
+        if self._file is None:
+            return
+        try:
+            self._file.seek(0)
+            if os.name == "nt":
+                import msvcrt
+                msvcrt.locking(self._file.fileno(), msvcrt.LK_UNLCK, 1)
+            else:
+                import fcntl
+                fcntl.flock(self._file.fileno(), fcntl.LOCK_UN)
+        finally:
+            self._file.close()
+            self._file = None
+
+    def __enter__(self):
+        return self.acquire()
+
+    def __exit__(self, exc_type, exc, tb):
+        self.release()
+        return False
+
 
 
 def load_env(key, default=""):
@@ -123,6 +179,8 @@ def _validate_queue_item(item):
         raise ValueError("У события отсутствует корректный id")
     if not isinstance(item.get("text", ""), str):
         raise ValueError("Поле text должно быть строкой")
+    if item.get("delivery_state", "pending") not in ("pending", "sending", "sent", "delivery_unknown"):
+        raise ValueError("Поле delivery_state имеет неизвестное значение")
     if "telegram_sent" in item and not isinstance(item["telegram_sent"], bool):
         raise ValueError("Поле telegram_sent должно быть логическим")
     if item.get("telegram_sent"):
@@ -269,7 +327,7 @@ def process_file(path, token, default_channel):
     except (TypeError, ValueError) as exc:
         _quarantine_corrupt_item(path, exc)
         return
-    # Если Telegram уже подтвердил доставку, повторяем только архивирование.
+    if item.get("delivery_state") == "sending":\n        _mark_delivery_unknown(path, item, "Bridge restarted while delivery was marked sending")\n        return\n    if item.get("delivery_state") == "delivery_unknown":\n        return\n    # Если Telegram уже подтвердил доставку, повторяем только архивирование.
     # TTL и отправка здесь больше не применяются.
     if item.get("telegram_sent"):
         _finish_archived_delivery(path, item)
@@ -353,7 +411,7 @@ def main():
     if not token or not channel or token.startswith("ВСТАВЬТЕ"):
         log("[BRIDGE STOPPED] Fill TELEGRAM_BOT_TOKEN and TELEGRAM_CHANNEL in root .env")
         return 2
-    log("[BRIDGE] Crypto Setup Analyzer Telegram Bridge based on Reversal Lab v51 started")
+    log("[BRIDGE] Crypto Setup Analyzer Telegram Bridge started")
     log(f"[BRIDGE] Queue: {QUEUE_DIR}")
     log(f"[BRIDGE] Channel: {channel}")
     log("[BRIDGE] Route ONLY this executable through hide.me VPN.")
