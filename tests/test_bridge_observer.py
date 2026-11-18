@@ -202,10 +202,16 @@ class BridgeObserverIntegrationTests(unittest.TestCase):
             }), encoding="utf-8")
             response = {"ok": True, "result": {"message_id": 88, "chat": {"id": -10088}}}
             real_archive = bridge.archive_delivery
+            archive_calls = []
+            def fail_once_then_archive(*args, **kwargs):
+                archive_calls.append(1)
+                if len(archive_calls) == 1:
+                    raise RuntimeError("db busy")
+                return real_archive(*args, **kwargs)
             with patch.object(bridge, "BASE_DIR", str(base)), \
                  patch.object(bridge, "QUEUE_DIR", str(queue)), \
                  patch.object(bridge, "LOG_FILE", str(base / "bridge.log")), \
-                 patch.object(bridge, "archive_delivery", side_effect=[RuntimeError("db busy"), real_archive]) as archive_mock, \
+                 patch.object(bridge, "archive_delivery", side_effect=fail_once_then_archive) as archive_mock, \
                  patch.object(bridge.urllib.request, "urlopen", return_value=FakeResponse(response)) as telegram_mock:
                 bridge.process_file(str(message), "123:token", "@test_channel")
                 self.assertTrue(message.exists())
@@ -221,6 +227,7 @@ class BridgeObserverIntegrationTests(unittest.TestCase):
                 self.assertFalse(photo.exists())
                 self.assertEqual(telegram_mock.call_count, 1)
                 self.assertEqual(archive_mock.call_count, 2)
+                self.assertEqual(len(archive_calls), 2)
                 archived_media = list((base / "observer_data" / "media").glob("*"))
                 self.assertEqual(len(archived_media), 1)
                 self.assertEqual(archived_media[0].read_bytes(), b"card-bytes")
@@ -233,7 +240,7 @@ class BridgeObserverIntegrationTests(unittest.TestCase):
             message = queue / "message.json"
             message.write_text(json.dumps({
                 "id": "cleanup-retry", "created_ts": bridge.time.time(),
-                "kind": "LEVEL_APPROACH", "text": "ZECUSDT · LONG",
+                "kind": "message", "text": "ZECUSDT · LONG",
             }), encoding="utf-8")
             response = {"ok": True, "result": {"message_id": 89, "chat": {"id": -10089}}}
             real_remove = bridge.os.remove
