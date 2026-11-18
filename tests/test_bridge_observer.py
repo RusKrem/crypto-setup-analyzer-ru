@@ -270,8 +270,8 @@ class BridgeObserverIntegrationTests(unittest.TestCase):
             queue.mkdir()
             message = queue / "timeout.json"
             message.write_text(json.dumps({"id": "timeout-1", "text": "test"}), encoding="utf-8")
-            with patch.object(bridge, "QUEUE_DIR", str(queue)), \\
-                 patch.object(bridge, "LOG_FILE", str(base / "bridge.log")), \\
+            with patch.object(bridge, "QUEUE_DIR", str(queue)), \
+                 patch.object(bridge, "LOG_FILE", str(base / "bridge.log")), \
                  patch.object(bridge.urllib.request, "urlopen", side_effect=TimeoutError("read timed out")) as sender:
                 bridge.process_file(str(message), "123:token", "@test_channel")
                 sender.assert_called_once()
@@ -292,8 +292,8 @@ class BridgeObserverIntegrationTests(unittest.TestCase):
             message.write_text(json.dumps({
                 "id": "restart-1", "text": "test", "delivery_state": "sending"
             }), encoding="utf-8")
-            with patch.object(bridge, "QUEUE_DIR", str(queue)), \\
-                 patch.object(bridge, "LOG_FILE", str(base / "bridge.log")), \\
+            with patch.object(bridge, "QUEUE_DIR", str(queue)), \
+                 patch.object(bridge, "LOG_FILE", str(base / "bridge.log")), \
                  patch.object(bridge.urllib.request, "urlopen") as sender:
                 bridge.process_file(str(message), "123:token", "@test_channel")
                 sender.assert_not_called()
@@ -308,8 +308,8 @@ class BridgeObserverIntegrationTests(unittest.TestCase):
             queue.mkdir()
             message = queue / "rejected.json"
             message.write_text(json.dumps({"id": "rejected-1", "text": "test"}), encoding="utf-8")
-            with patch.object(bridge, "QUEUE_DIR", str(queue)), \\
-                 patch.object(bridge, "LOG_FILE", str(base / "bridge.log")), \\
+            with patch.object(bridge, "QUEUE_DIR", str(queue)), \
+                 patch.object(bridge, "LOG_FILE", str(base / "bridge.log")), \
                  patch.object(bridge.urllib.request, "urlopen", return_value=FakeResponse({
                      "ok": False, "description": "chat not found"
                  })):
@@ -329,8 +329,8 @@ class BridgeObserverIntegrationTests(unittest.TestCase):
             message = queue / "http-rejected.json"
             message.write_text(json.dumps({"id": "http-rejected-1", "text": "test"}), encoding="utf-8")
             error = HTTPError("https://api.telegram.org/test", 400, "Bad Request", {}, None)
-            with patch.object(bridge, "QUEUE_DIR", str(queue)), \\
-                 patch.object(bridge, "LOG_FILE", str(base / "bridge.log")), \\
+            with patch.object(bridge, "QUEUE_DIR", str(queue)), \
+                 patch.object(bridge, "LOG_FILE", str(base / "bridge.log")), \
                  patch.object(bridge.urllib.request, "urlopen", side_effect=error):
                 bridge.process_file(str(message), "123:token", "@test_channel")
             saved = json.loads(message.read_text(encoding="utf-8"))
@@ -357,10 +357,10 @@ class BridgeObserverIntegrationTests(unittest.TestCase):
             message = queue / "sent.json"
             message.write_text(json.dumps({"id": "sent-1", "text": "test"}), encoding="utf-8")
             response = {"ok": True, "result": {"message_id": 90, "chat": {"id": -10090}}}
-            with patch.object(bridge, "BASE_DIR", str(base)), \\
-                 patch.object(bridge, "QUEUE_DIR", str(queue)), \\
-                 patch.object(bridge, "LOG_FILE", str(base / "bridge.log")), \\
-                 patch.object(bridge, "archive_delivery", return_value=True), \\
+            with patch.object(bridge, "BASE_DIR", str(base)), \
+                 patch.object(bridge, "QUEUE_DIR", str(queue)), \
+                 patch.object(bridge, "LOG_FILE", str(base / "bridge.log")), \
+                 patch.object(bridge, "archive_delivery", return_value=True), \
                  patch.object(bridge.urllib.request, "urlopen", return_value=FakeResponse(response)):
                 bridge.process_file(str(message), "123:token", "@test_channel")
             self.assertFalse(message.exists())
