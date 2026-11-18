@@ -618,5 +618,43 @@ class ReboundScannerTests(unittest.TestCase):
         self.assertNotIn(old_key, scanner._confirmed_alerts)
 
 
+    def test_stop_during_websocket_construction_closes_unpublished_app(self):
+        scanner = ReboundScanner(lambda message: None, lambda signal: None)
+        calls = []
+
+        class FakeWebSocketApp:
+            def __init__(self, *args, **kwargs):
+                scanner.stop()
+
+            def close(self):
+                calls.append("close")
+
+            def run_forever(self, **kwargs):
+                calls.append("run")
+
+        with patch("crypto_setup_analyzer.rebound_scanner.websocket.WebSocketApp", FakeWebSocketApp):
+            scanner._ws_loop()
+
+        self.assertEqual(calls, ["close"])
+        self.assertIsNone(scanner._ws_app)
+
+    def test_stop_closes_published_websocket_app(self):
+        scanner = ReboundScanner(lambda message: None, lambda signal: None)
+        calls = []
+
+        class FakeWebSocketApp:
+            def close(self):
+                calls.append("close")
+
+        app = FakeWebSocketApp()
+        with scanner._lock:
+            scanner._ws_app = app
+
+        scanner.stop()
+
+        self.assertEqual(calls, ["close"])
+        self.assertTrue(scanner._stop.is_set())
+
+
 if __name__ == "__main__":
     unittest.main()
