@@ -97,11 +97,58 @@ def iter_messages():
 
 
 def _save_queue_item(path, item):
-    """Атомарно сохраняет состояние очереди, не оставляя частичный JSON."""
+    """Атомарно сохраняет состояние очереди и очищает temp-файл при сбое."""
     tmp = path + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(item, f, ensure_ascii=False, indent=2)
-    os.replace(tmp, path)
+    try:
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(item, f, ensure_ascii=False, indent=2)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, path)
+    finally:
+        try:
+            if os.path.exists(tmp):
+                os.remove(tmp)
+        except OSError:
+            pass
+
+
+def _validate_queue_item(item):
+    """Проверяет структуру JSON очереди до обращения к её полям."""
+    import math
+
+    if not isinstance(item, dict):
+        raise ValueError("Корень JSON очереди должен быть объектом")
+    if not isinstance(item.get("id"), str) or not item["id"].strip():
+        raise ValueError("У события отсутствует корректный id")
+    if not isinstance(item.get("text", ""), str):
+        raise ValueError("Поле text должно быть строкой")
+    if "telegram_sent" in item and not isinstance(item["telegram_sent"], bool):
+        raise ValueError("Поле telegram_sent должно быть логическим")
+    if item.get("telegram_sent"):
+        if not isinstance(item.get("telegram_result"), dict):
+            raise ValueError("У доставленного события отсутствует telegram_result")
+        if not item["telegram_result"].get("ok"):
+            raise ValueError("telegram_result не подтверждает успешную доставку")
+        if item.get("sent_ts") is None:
+            raise ValueError("У доставленного события отсутствует sent_ts")
+    numeric_fields = (
+        "created_ts", "ttl_seconds", "attempts", "next_attempt_ts",
+        "archive_attempts", "archive_next_attempt_ts", "sent_ts",
+    )
+    for field in numeric_fields:
+        value = item.get(field)
+        if value is None:
+            continue
+        if isinstance(value, bool):
+            raise ValueError(f"Поле {field} имеет неверный тип")
+        try:
+            number = float(value)
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise ValueError(f"Поле {field} имеет неверный формат") from exc
+        if not math.isfinite(number) or number < 0:
+            raise ValueError(f"Поле {field} имеет недопустимое значение")
+    return item
 
 
 def _validated_photo_path(photo_name):
@@ -173,6 +220,11 @@ def _finish_archived_delivery(path, item):
         os.remove(path)
     except FileNotFoundError:
         pass
+    except OSError as exc:
+        # Архив уже сохранён. Оставляем telegram_sent JSON для безопасной
+        # повторной очистки, не останавливая весь Bridge.
+        log(f"[QUEUE CLEANUP PENDING] id={msg_id}: {exc}")
+        return False
     log(f"[TELEGRAM SENT] {item.get('kind', 'message')} id={msg_id}")
     return True
 
@@ -210,6 +262,11 @@ def process_file(path, token, default_channel):
         with open(path, "r", encoding="utf-8-sig") as f:
             item = json.load(f)
     except Exception as exc:
+        _quarantine_corrupt_item(path, exc)
+        return
+    try:
+        _validate_queue_item(item)
+    except (TypeError, ValueError) as exc:
         _quarantine_corrupt_item(path, exc)
         return
     # Если Telegram уже подтвердил доставку, повторяем только архивирование.
