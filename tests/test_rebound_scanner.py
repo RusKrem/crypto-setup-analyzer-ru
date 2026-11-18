@@ -45,6 +45,56 @@ class ReboundScannerTests(unittest.TestCase):
             self.assertEqual(second._active_alerts, set())
             self.assertEqual(second._approach_started, {})
 
+    def test_stop_flushes_active_approach_state(self):
+        import json
+        import tempfile
+        from pathlib import Path
+        from crypto_setup_analyzer import rebound_scanner as module
+
+        with tempfile.TemporaryDirectory() as folder:
+            state_path = Path(folder) / "scanner_state.json"
+            scanner = ReboundScanner(lambda message: None, lambda signal: None, state_path=state_path)
+            scanner._symbols = ["TESTUSDT"]
+            scanner._levels_cache["TESTUSDT"] = [("PDL", 100.0, "Предыдущий день")]
+            with patch.object(module.time, "time", return_value=1000.0):
+                scanner._handle_price("TESTUSDT", 100.3)
+            scanner.stop()
+            saved = json.loads(state_path.read_text(encoding="utf-8"))
+            self.assertEqual(len(saved["active"]), 1)
+            self.assertEqual(saved["active"][0]["started"], 1000.0)
+
+    def test_confirmed_approach_state_survives_restart(self):
+        import json
+        import tempfile
+        from pathlib import Path
+        from crypto_setup_analyzer import rebound_scanner as module
+
+        with tempfile.TemporaryDirectory() as folder:
+            state_path = Path(folder) / "scanner_state.json"
+            scanner = ReboundScanner(lambda message: None, lambda signal: None, state_path=state_path)
+            key = scanner._alert_key("TESTUSDT", "PDH")
+            scanner._active_alerts.add(key)
+            scanner._approach_started[key] = 1000.0
+            candle = [1_002_000, "99", "101", "98.5", "99.2", "1", 1_061_999]
+            with patch.object(module.time, "time", return_value=1063.0):
+                result = scanner._claim_confirmation(key, candle, 100.0, "SHORT")
+            self.assertIsNotNone(result)
+            restored = ReboundScanner(lambda message: None, lambda signal: None, state_path=state_path)
+            restored_key = restored._alert_key("TESTUSDT", "PDH")
+            self.assertIn(restored_key, restored._confirmed_alerts)
+            self.assertEqual(restored._last_confirmed_candle[restored_key], int(candle[6]))
+
+    def test_malformed_state_root_is_ignored(self):
+        import tempfile
+        from pathlib import Path
+
+        with tempfile.TemporaryDirectory() as folder:
+            state_path = Path(folder) / "scanner_state.json"
+            state_path.write_text('["not", "an", "object"]', encoding="utf-8")
+            scanner = ReboundScanner(lambda message: None, lambda signal: None, state_path=state_path)
+            self.assertEqual(scanner._active_alerts, set())
+            self.assertEqual(scanner._approach_started, {})
+
     def test_websocket_event_time_is_preserved_in_price_update_and_alert(self):
         updates = []
         alerts = []
