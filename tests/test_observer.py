@@ -115,6 +115,46 @@ class ObserverTests(unittest.TestCase):
             media_dir = base / "observer_data" / "media"
             self.assertEqual(list(media_dir.iterdir()), [])
 
+    def test_legacy_database_is_migrated_with_metadata_column(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            archive = base / "observer_data"
+            archive.mkdir()
+            db = archive / "observer_events.sqlite3"
+            with sqlite3.connect(db) as conn:
+                conn.execute(
+                    """CREATE TABLE events (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        queue_id TEXT NOT NULL UNIQUE,
+                        kind TEXT NOT NULL,
+                        symbol TEXT,
+                        direction TEXT,
+                        level_name TEXT,
+                        level_price REAL,
+                        price REAL,
+                        distance_pct REAL,
+                        wick_body_ratio REAL,
+                        close_position REAL,
+                        raw_text TEXT NOT NULL,
+                        created_at REAL NOT NULL,
+                        sent_at REAL NOT NULL,
+                        telegram_chat_id TEXT,
+                        telegram_message_id TEXT,
+                        media_path TEXT
+                    )"""
+                )
+            item = {"id": "legacy-migration", "kind": "LEVEL_APPROACH",
+                    "text": "ZECUSDT · LONG", "created_ts": time.time()}
+            self.assertTrue(archive_delivery(base, item))
+            with sqlite3.connect(db) as conn:
+                columns = {row[1] for row in conn.execute("PRAGMA table_info(events)")}
+                metadata = conn.execute(
+                    "SELECT metadata_json FROM events WHERE queue_id=?",
+                    ("legacy-migration",),
+                ).fetchone()
+            self.assertIn("metadata_json", columns)
+            self.assertEqual(metadata[0], "{}")
+
     def test_same_queue_id_is_not_archived_twice(self):
         with tempfile.TemporaryDirectory() as tmp:
             item = {"id": "same-id", "kind": "LEVEL_APPROACH", "text": "ZECUSDT · LONG"}
