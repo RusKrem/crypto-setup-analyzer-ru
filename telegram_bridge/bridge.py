@@ -352,6 +352,7 @@ def process_file(path, token, default_channel):
     msg = str(item.get("text", ""))
     msg_id = item.get("id", os.path.basename(path))
     attempts = int(item.get("attempts", 0) or 0)
+    request_started = False
     try:
         photo_name = item.get("photo_path")
         if photo_name:
@@ -374,14 +375,32 @@ def process_file(path, token, default_channel):
             body = urllib.parse.urlencode({"chat_id": channel, "text": msg, "disable_web_page_preview": "true"}).encode("utf-8")
             req = urllib.request.Request(url, data=body, method="POST")
             req.add_header("Content-Type", "application/x-www-form-urlencoded")
-        with urllib.request.urlopen(req, timeout=REQUEST_TIMEOUT) as response:
-            data = json.loads(response.read().decode("utf-8", errors="replace"))
-        if not data.get("ok"):
-            raise RuntimeError(data.get("description", "Telegram API error"))
+        # Persist intent immediately before the network call. A restart after
+        # this point must not blindly send the same notification a second time.
+        item["delivery_state"] = "sending"
+        _save_queue_item(path, item)
+        request_started = True
+        try:
+            with urllib.request.urlopen(req, timeout=REQUEST_TIMEOUT) as response:
+                data = json.loads(response.read().decode("utf-8", errors="replace"))
+        except HTTPError as http_exc:
+            if 400 <= http_exc.code < 500:
+                item["delivery_state"] = "pending"
+                raise RuntimeError(f"Telegram HTTP rejection {http_exc.code}: {http_exc}") from http_exc
+            _mark_delivery_unknown(path, item, f"Telegram HTTP {http_exc.code}: outcome may be ambiguous")
+            return
+        except Exception as network_exc:
+            _mark_delivery_unknown(path, item, f"{type(network_exc).__name__}: {network_exc}")
+            return
+        if not isinstance(data, dict) or not data.get("ok"):
+            item["delivery_state"] = "pending"
+            description = data.get("description", "Telegram API rejected the request") if isinstance(data, dict) else "Invalid Telegram API response"
+            raise RuntimeError(description)
 
         # Сначала фиксируем подтверждённую Telegram доставку в очереди.
         # При сбое SQLite следующий проход повторит архивирование, а не отправку.
         item["telegram_sent"] = True
+        item["delivery_state"] = "sent"
         item["telegram_result"] = data
         item["sent_ts"] = time.time()
         try:
@@ -392,6 +411,9 @@ def process_file(path, token, default_channel):
 
         _finish_archived_delivery(path, item)
     except Exception as exc:
+        if item.get("delivery_state") == "sending" and request_started:
+            _mark_delivery_unknown(path, item, exc)
+            return
         attempts += 1
         delay = min(300, max(5, 2 ** min(attempts, 8)))
         item["attempts"] = attempts
@@ -437,4 +459,9 @@ def main():
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    try:
+        with SingleInstanceLock(LOCK_FILE):
+            raise SystemExit(main())
+    except BridgeAlreadyRunning as exc:
+        log(f"[BRIDGE STOPPED] {exc}")
+        raise SystemExit(2)
