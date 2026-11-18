@@ -263,5 +263,107 @@ class BridgeObserverIntegrationTests(unittest.TestCase):
                 self.assertEqual(telegram_mock.call_count, 1)
 
 
+    def test_timeout_after_request_start_is_quarantined_without_retry(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            queue = base / "telegram_queue"
+            queue.mkdir()
+            message = queue / "timeout.json"
+            message.write_text(json.dumps({"id": "timeout-1", "text": "test"}), encoding="utf-8")
+            with patch.object(bridge, "QUEUE_DIR", str(queue)), \\
+                 patch.object(bridge, "LOG_FILE", str(base / "bridge.log")), \\
+                 patch.object(bridge.urllib.request, "urlopen", side_effect=TimeoutError("read timed out")) as sender:
+                bridge.process_file(str(message), "123:token", "@test_channel")
+                sender.assert_called_once()
+            self.assertFalse(message.exists())
+            quarantined = list((queue / "failed" / "delivery_unknown").glob("*.json"))
+            self.assertEqual(len(quarantined), 1)
+            saved = json.loads(quarantined[0].read_text(encoding="utf-8"))
+            self.assertEqual(saved["delivery_state"], "delivery_unknown")
+            bridge.process_file(str(quarantined[0]), "123:token", "@test_channel")
+            self.assertEqual(sender.call_count, 1)
+
+    def test_restart_with_sending_state_is_quarantined(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            queue = base / "telegram_queue"
+            queue.mkdir()
+            message = queue / "restart.json"
+            message.write_text(json.dumps({
+                "id": "restart-1", "text": "test", "delivery_state": "sending"
+            }), encoding="utf-8")
+            with patch.object(bridge, "QUEUE_DIR", str(queue)), \\
+                 patch.object(bridge, "LOG_FILE", str(base / "bridge.log")), \\
+                 patch.object(bridge.urllib.request, "urlopen") as sender:
+                bridge.process_file(str(message), "123:token", "@test_channel")
+                sender.assert_not_called()
+            quarantined = list((queue / "failed" / "delivery_unknown").glob("*.json"))
+            self.assertEqual(len(quarantined), 1)
+            self.assertEqual(json.loads(quarantined[0].read_text())["delivery_state"], "delivery_unknown")
+
+    def test_explicit_telegram_api_rejection_is_retried_not_marked_unknown(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            queue = base / "telegram_queue"
+            queue.mkdir()
+            message = queue / "rejected.json"
+            message.write_text(json.dumps({"id": "rejected-1", "text": "test"}), encoding="utf-8")
+            with patch.object(bridge, "QUEUE_DIR", str(queue)), \\
+                 patch.object(bridge, "LOG_FILE", str(base / "bridge.log")), \\
+                 patch.object(bridge.urllib.request, "urlopen", return_value=FakeResponse({
+                     "ok": False, "description": "chat not found"
+                 })):
+                bridge.process_file(str(message), "123:token", "@test_channel")
+            self.assertTrue(message.exists())
+            saved = json.loads(message.read_text(encoding="utf-8"))
+            self.assertEqual(saved["delivery_state"], "pending")
+            self.assertEqual(saved["attempts"], 1)
+            self.assertFalse((queue / "failed" / "delivery_unknown").exists())
+
+    def test_http_4xx_is_explicit_rejection_and_remains_retryable(self):
+        from urllib.error import HTTPError
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            queue = base / "telegram_queue"
+            queue.mkdir()
+            message = queue / "http-rejected.json"
+            message.write_text(json.dumps({"id": "http-rejected-1", "text": "test"}), encoding="utf-8")
+            error = HTTPError("https://api.telegram.org/test", 400, "Bad Request", {}, None)
+            with patch.object(bridge, "QUEUE_DIR", str(queue)), \\
+                 patch.object(bridge, "LOG_FILE", str(base / "bridge.log")), \\
+                 patch.object(bridge.urllib.request, "urlopen", side_effect=error):
+                bridge.process_file(str(message), "123:token", "@test_channel")
+            saved = json.loads(message.read_text(encoding="utf-8"))
+            self.assertEqual(saved["delivery_state"], "pending")
+            self.assertEqual(saved["attempts"], 1)
+
+    def test_single_instance_lock_rejects_second_owner_and_releases(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            lock_path = str(Path(tmp) / ".bridge.lock")
+            first = bridge.SingleInstanceLock(lock_path).acquire()
+            try:
+                with self.assertRaises(bridge.BridgeAlreadyRunning):
+                    bridge.SingleInstanceLock(lock_path).acquire()
+            finally:
+                first.release()
+            second = bridge.SingleInstanceLock(lock_path).acquire()
+            second.release()
+
+    def test_success_persists_sent_delivery_state(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            queue = base / "telegram_queue"
+            queue.mkdir()
+            message = queue / "sent.json"
+            message.write_text(json.dumps({"id": "sent-1", "text": "test"}), encoding="utf-8")
+            response = {"ok": True, "result": {"message_id": 90, "chat": {"id": -10090}}}
+            with patch.object(bridge, "BASE_DIR", str(base)), \\
+                 patch.object(bridge, "QUEUE_DIR", str(queue)), \\
+                 patch.object(bridge, "LOG_FILE", str(base / "bridge.log")), \\
+                 patch.object(bridge, "archive_delivery", return_value=True), \\
+                 patch.object(bridge.urllib.request, "urlopen", return_value=FakeResponse(response)):
+                bridge.process_file(str(message), "123:token", "@test_channel")
+            self.assertFalse(message.exists())
+
 if __name__ == "__main__":
     unittest.main()
