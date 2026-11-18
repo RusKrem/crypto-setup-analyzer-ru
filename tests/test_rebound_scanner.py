@@ -262,6 +262,25 @@ class ReboundScannerTests(unittest.TestCase):
             now=1003.0,
         ))
 
+    def test_confirmation_rejects_candle_that_opened_before_approach(self):
+        scanner = ReboundScanner(lambda message: None, lambda signal: None)
+        # Свеча закрылась после подхода, но её диапазон начал формироваться раньше.
+        self.assertFalse(scanner._is_confirmation_fresh(
+            close_time_ms=1_060_000,
+            approach_started=1001.0,
+            now=1004.0,
+            open_time_ms=1_000_000,
+        ))
+
+    def test_confirmation_accepts_candle_opened_after_approach(self):
+        scanner = ReboundScanner(lambda message: None, lambda signal: None)
+        self.assertTrue(scanner._is_confirmation_fresh(
+            close_time_ms=1_062_000,
+            approach_started=1001.0,
+            now=1004.0,
+            open_time_ms=1_002_000,
+        ))
+
     def test_confirmation_rejects_approach_older_than_five_minutes(self):
         scanner = ReboundScanner(lambda message: None, lambda signal: None)
         self.assertFalse(scanner._is_confirmation_fresh(
