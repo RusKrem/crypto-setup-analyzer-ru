@@ -7,6 +7,7 @@ import requests
 import json
 import math
 import websocket
+from pathlib import Path
 
 BASE_URL = "https://fapi.binance.com"
 TOP_ALTCOINS_COUNT = 30
@@ -199,7 +200,7 @@ class ReboundScanner:
 
     def __init__(self, on_status, on_signal, on_symbols=None, on_trade_update=None,
                  on_price_update=None, on_confirmation=None, batch_size=30, interval_seconds=3, alert_distance_pct=ALERT_DISTANCE_PCT,
-                 symbol_refresh_seconds=900, levels_refresh_seconds=60):
+                 symbol_refresh_seconds=900, levels_refresh_seconds=60, state_path=None):
         self.on_status = on_status
         self.on_signal = on_signal
         self.on_symbols = on_symbols or (lambda count: None)
@@ -227,6 +228,58 @@ class ReboundScanner:
         self._last_ws_price_at = {}
         self._last_ws_event_time = {}
         self._lock = threading.RLock()
+        self._state_path = Path(state_path) if state_path else None
+        self._load_persisted_state()
+
+    def _load_persisted_state(self):
+        """Восстанавливает только незавершённые подходы не старше пяти минут."""
+        if self._state_path is None or not self._state_path.is_file():
+            return
+        try:
+            data = json.loads(self._state_path.read_text(encoding="utf-8"))
+            now = time.time()
+            for entry in data.get("active", []):
+                key_data = entry.get("key", [])
+                if len(key_data) != 3 or not isinstance(key_data[2], list):
+                    continue
+                key = (str(key_data[0]), str(key_data[1]), tuple(key_data[2]))
+                started = float(entry["started"])
+                if not 0 <= now - started <= 300:
+                    continue
+                self._active_alerts.add(key)
+                self._approach_started[key] = started
+                last_candle = entry.get("last_confirmed_candle")
+                if last_candle is not None:
+                    self._last_confirmed_candle[key] = int(last_candle)
+                if entry.get("confirmed"):
+                    self._confirmed_alerts.add(key)
+        except (OSError, ValueError, TypeError, KeyError, json.JSONDecodeError):
+            # Повреждённый файл не должен останавливать сканер.
+            return
+
+    def _persist_state_locked(self):
+        """Атомарно сохраняет жизненный цикл активных подходов."""
+        if self._state_path is None:
+            return
+        active = []
+        for key in self._active_alerts:
+            started = self._approach_started.get(key)
+            if started is None:
+                continue
+            active.append({
+                "key": [key[0], key[1], list(key[2])],
+                "started": started,
+                "last_confirmed_candle": self._last_confirmed_candle.get(key),
+                "confirmed": key in self._confirmed_alerts,
+            })
+        payload = {"version": 1, "active": active}
+        try:
+            self._state_path.parent.mkdir(parents=True, exist_ok=True)
+            temporary = self._state_path.with_suffix(self._state_path.suffix + ".tmp")
+            temporary.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+            temporary.replace(self._state_path)
+        except OSError as exc:
+            self.on_status(f"Не удалось сохранить состояние подходов: {str(exc)[:100]}")
 
     @property
     def running(self):
