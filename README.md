@@ -131,3 +131,4 @@ This repository demonstrates Python application development, API integration, We
 - [PATCH 10: Telegram queue and scanner state recovery](PATCH_10_QUEUE_AND_STATE_RECOVERY_RU.md)
 - [PATCH 11: Telegram delivery pipeline hardening](PATCH_11_DELIVERY_PIPELINE_RU.md)
 - [PATCH 12: Scanner lifecycle and state recovery](PATCH_12_SCANNER_LIFECYCLE_RU.md)
+- [PATCH 13: Telegram → Observer end-to-end delivery hardening](PATCH_13_TELEGRAM_OBSERVER_E2E_RU.md)
