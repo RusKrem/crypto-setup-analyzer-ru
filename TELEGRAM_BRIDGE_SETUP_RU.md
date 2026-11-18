@@ -10,7 +10,9 @@ The scanner writes messages to `telegram_queue` as JSON files and does not conta
 5. Run `telegram_bridge\\start_bridge.bat`, check `telegram_bridge_log.txt` for `[NETWORK] TELEGRAM API OK bot=@...`, then run `START.bat`.
 
 ## Queue and expiration
-Messages are written into `telegram_queue`. Files are removed only after Telegram confirms successful delivery. Failed sends are retried. `LEVEL_APPROACH` alerts expire after 300 seconds; stale level alerts are discarded. Other message types have no TTL unless set by the caller.
+Messages are written into `telegram_queue`. Files are removed only after Telegram confirms successful delivery and Observer has archived the event. Failed sends are retried. `LEVEL_APPROACH` alerts expire after 300 seconds; stale level alerts are discarded. Other message types have no TTL unless set by the caller.
+
+If Telegram confirms delivery but Observer/SQLite is temporarily unavailable, Bridge stores the Telegram response and a `telegram_sent` marker in the queue file. It then retries only the local archive operation with backoff; it does not send the Telegram message again. Such files remain in `telegram_queue` until Observer saves the event. Do not manually delete these pending files if you want to preserve the local event history.
 
 ## Diagnostics
 Log: `telegram_bridge_log.txt` in the project root. DNS, TCP/443 and Bot API `getMe` are checked separately. This package has not been tested against your hide.me installation; confirm the API OK line and a real channel post.
