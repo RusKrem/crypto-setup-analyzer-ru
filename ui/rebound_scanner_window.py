@@ -255,7 +255,7 @@ class ReboundScannerWindow:
         )
 
     def update_price(self, update):
-        """Создаёт строку при первом тике цены, а не ждёт сигнала."""
+        """Обновляет цену, не стирая уже полученный статус подтверждения."""
         key = (update["symbol"], update["level_name"])
         in_zone = bool(update.get("in_zone", False))
         state = "ПРИБЛИЖЕНИЕ" if in_zone else "Наблюдение"
@@ -265,18 +265,26 @@ class ReboundScannerWindow:
         )
         trend, trend_tag = self._trend(update)
         tag = "APPROACH" if in_zone else "WATCH"
-        values = self._values(update, state, details, trend)
         row_id = self._row_ids.get(key)
 
         if row_id and self.table.exists(row_id):
+            previous_state = self.table.set(row_id, "status")
+            if previous_state == "РЕАКЦИЯ ПОДТВЕРЖДЕНА":
+                state = previous_state
+                details = self.table.set(row_id, "details")
+                tag = "CONFIRMED"
+
+        values = self._values(update, state, details, trend)
+        if row_id and self.table.exists(row_id):
             self.table.item(row_id, values=values, tags=(tag,))
         else:
-            # Ключевое исправление: добавляем строку даже вне зоны предупреждения.
+            # Строка появляется даже вне зоны предупреждения.
             row_id = self.table.insert("", "end", values=values, tags=(tag,))
             self._row_ids[key] = row_id
 
         self.table.tag_configure("APPROACH", foreground="#b36b00")
         self.table.tag_configure("WATCH", foreground="#667788")
+        self.table.tag_configure("CONFIRMED", foreground="#159b65")
         self._sort_rows()
 
     def close(self):
