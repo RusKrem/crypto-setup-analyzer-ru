@@ -3,6 +3,48 @@ from unittest.mock import patch
 from crypto_setup_analyzer.rebound_scanner import (scan_symbol, ReboundScanner, ALERT_DISTANCE_PCT, _validate_klines)
 
 class ReboundScannerTests(unittest.TestCase):
+    def test_active_approach_is_restored_after_scanner_restart(self):
+        import tempfile
+        from pathlib import Path
+        from crypto_setup_analyzer import rebound_scanner as module
+
+        with tempfile.TemporaryDirectory() as folder:
+            state_path = Path(folder) / "data" / "scanner_state.json"
+            first = ReboundScanner(
+                lambda message: None, lambda signal: None,
+                state_path=state_path,
+            )
+            first._symbols = ["TESTUSDT"]
+            first._levels_cache["TESTUSDT"] = [("PDL", 100.0, "Предыдущий день")]
+            with patch.object(module.time, "time", return_value=1000.0):
+                first._handle_price("TESTUSDT", 100.3)
+
+            second = ReboundScanner(
+                lambda message: None, lambda signal: None,
+                state_path=state_path,
+            )
+            key = second._alert_key("TESTUSDT", "PDL")
+            self.assertIn(key, second._active_alerts)
+            self.assertEqual(second._approach_started[key], 1000.0)
+
+    def test_expired_approach_is_not_restored_after_restart(self):
+        import tempfile
+        from pathlib import Path
+        from crypto_setup_analyzer import rebound_scanner as module
+
+        with tempfile.TemporaryDirectory() as folder:
+            state_path = Path(folder) / "scanner_state.json"
+            first = ReboundScanner(lambda message: None, lambda signal: None, state_path=state_path)
+            first._symbols = ["TESTUSDT"]
+            first._levels_cache["TESTUSDT"] = [("PDL", 100.0, "Предыдущий день")]
+            with patch.object(module.time, "time", return_value=1000.0):
+                first._handle_price("TESTUSDT", 100.3)
+            second = ReboundScanner(lambda message: None, lambda signal: None, state_path=state_path)
+            with patch.object(module.time, "time", return_value=1301.0):
+                second._load_persisted_state()
+            self.assertEqual(second._active_alerts, set())
+            self.assertEqual(second._approach_started, {})
+
     def test_websocket_event_time_is_preserved_in_price_update_and_alert(self):
         updates = []
         alerts = []
