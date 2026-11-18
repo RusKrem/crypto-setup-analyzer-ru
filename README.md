@@ -125,3 +125,9 @@ The scanner does not send Telegram network requests directly. The bridge is a se
 ## Portfolio note
 
 This repository demonstrates Python application development, API integration, WebSocket processing, event-driven GUI work, SQLite persistence, chart rendering, queue-based integration, and automated tests. It should be presented as a working **research/monitoring application**, not as a proven profitable trading strategy.
+
+## Reliability patches
+
+- [PATCH 10: Telegram queue and scanner state recovery](PATCH_10_QUEUE_AND_STATE_RECOVERY_RU.md)
+- [PATCH 11: Telegram delivery pipeline hardening](PATCH_11_DELIVERY_PIPELINE_RU.md)
+- [PATCH 12: Scanner lifecycle and state recovery](PATCH_12_SCANNER_LIFECYCLE_RU.md)
