@@ -19,10 +19,11 @@ class ReboundScannerTests(unittest.TestCase):
             with patch.object(module.time, "time", return_value=1000.0):
                 first._handle_price("TESTUSDT", 100.3)
 
-            second = ReboundScanner(
-                lambda message: None, lambda signal: None,
-                state_path=state_path,
-            )
+            with patch.object(module.time, "time", return_value=1001.0):
+                second = ReboundScanner(
+                    lambda message: None, lambda signal: None,
+                    state_path=state_path,
+                )
             key = second._alert_key("TESTUSDT", "PDL")
             self.assertIn(key, second._active_alerts)
             self.assertEqual(second._approach_started[key], 1000.0)
@@ -39,9 +40,8 @@ class ReboundScannerTests(unittest.TestCase):
             first._levels_cache["TESTUSDT"] = [("PDL", 100.0, "Предыдущий день")]
             with patch.object(module.time, "time", return_value=1000.0):
                 first._handle_price("TESTUSDT", 100.3)
-            second = ReboundScanner(lambda message: None, lambda signal: None, state_path=state_path)
             with patch.object(module.time, "time", return_value=1301.0):
-                second._load_persisted_state()
+                second = ReboundScanner(lambda message: None, lambda signal: None, state_path=state_path)
             self.assertEqual(second._active_alerts, set())
             self.assertEqual(second._approach_started, {})
 
