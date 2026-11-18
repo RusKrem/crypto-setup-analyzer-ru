@@ -58,6 +58,62 @@ class ReboundScannerTests(unittest.TestCase):
     def test_default_threshold_is_half_percent(self):
         self.assertEqual(ALERT_DISTANCE_PCT, 0.5)
 
+    def test_levels_omit_previous_week_when_one_daily_candle_is_missing(self):
+        from datetime import datetime, timezone, timedelta
+        from crypto_setup_analyzer import rebound_scanner as module
+
+        class FixedDateTime(datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return cls(2026, 11, 18, 12, 0, tzinfo=timezone.utc)
+
+        rows = []
+        start = datetime(2026, 11, 3, tzinfo=timezone.utc).date()
+        for offset in range(16):
+            day = start + timedelta(days=offset)
+            if day == datetime(2026, 11, 12).date():
+                continue
+            stamp = int(datetime(day.year, day.month, day.day, tzinfo=timezone.utc).timestamp() * 1000)
+            rows.append([stamp, "100", "110", "90", "100", "1", stamp + 86399999])
+
+        with patch.object(module, "datetime", FixedDateTime), \
+             patch.object(module, "fetch_klines", return_value=rows):
+            levels = module._levels(object(), "TESTUSDT")
+        names = {name for name, _, _ in levels}
+        self.assertNotIn("PWH", names)
+        self.assertNotIn("PWL", names)
+        self.assertIn("PDH", names)
+        self.assertIn("PDL", names)
+        self.assertIn("Today High", names)
+        self.assertIn("Today Low", names)
+
+    def test_levels_do_not_assume_last_two_rows_are_yesterday_and_today(self):
+        from datetime import datetime, timezone, timedelta
+        from crypto_setup_analyzer import rebound_scanner as module
+
+        class FixedDateTime(datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return cls(2026, 11, 18, 12, 0, tzinfo=timezone.utc)
+
+        rows = []
+        start = datetime(2026, 11, 3, tzinfo=timezone.utc).date()
+        for offset in range(16):
+            day = start + timedelta(days=offset)
+            if day == datetime(2026, 11, 17).date():
+                continue
+            stamp = int(datetime(day.year, day.month, day.day, tzinfo=timezone.utc).timestamp() * 1000)
+            rows.append([stamp, "100", "110", "90", "100", "1", stamp + 86399999])
+
+        with patch.object(module, "datetime", FixedDateTime), \
+             patch.object(module, "fetch_klines", return_value=rows):
+            levels = module._levels(object(), "TESTUSDT")
+        names = {name for name, _, _ in levels}
+        self.assertNotIn("PDH", names)
+        self.assertNotIn("PDL", names)
+        self.assertIn("Today High", names)
+        self.assertIn("Today Low", names)
+
     def test_scanner_level_groups_are_limited_to_six_daily_weekly_levels(self):
         from datetime import datetime, timezone
         now = datetime.now(timezone.utc)
