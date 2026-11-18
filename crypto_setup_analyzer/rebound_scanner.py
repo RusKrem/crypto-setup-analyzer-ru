@@ -486,6 +486,7 @@ class ReboundScanner:
             # при повторном входе в зону в пределах той же минуты.
             for key in expired:
                 self._approach_started.pop(key, None)
+            self._persist_state_locked()
 
     @staticmethod
     def _is_confirmation_fresh(close_time_ms: int, approach_started: float | None,
@@ -549,6 +550,7 @@ class ReboundScanner:
             if not metrics:
                 return None
             self._confirmed_alerts.add(key)
+            self._persist_state_locked()
             return metrics
 
     def _release_confirmation_claim(self, key, close_time):
@@ -557,6 +559,7 @@ class ReboundScanner:
             self._confirmed_alerts.discard(key)
             if self._last_confirmed_candle.get(key) == close_time:
                 self._last_confirmed_candle.pop(key, None)
+            self._persist_state_locked()
 
     def _confirmation_loop(self):
         """Проверяет только завершённые 1m-свечи и публикует подтверждённые реакции."""
