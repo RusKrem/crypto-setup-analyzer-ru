@@ -36,49 +36,59 @@ class TelegramNotifier:
         return bool(self.token and self.chat_id and not self.token.startswith("ВСТАВЬТЕ")
                     and not self.chat_id.startswith("ВСТАВЬТЕ"))
 
+    def _enqueue(self, payload, photo_path=None):
+        """Атомарно записывает JSON очереди и очищает временные файлы при ошибке."""
+        created = float(payload["created_ts"])
+        filename = f"{int(created * 1000)}_{payload['id']}.json"
+        final_path = self.queue_dir / filename
+        tmp_path = final_path.with_suffix(".json.tmp")
+        try:
+            self.queue_dir.mkdir(parents=True, exist_ok=True)
+            encoded = json.dumps(payload, ensure_ascii=False, indent=2)
+            tmp_path.write_text(encoded, encoding="utf-8")
+            os.replace(tmp_path, final_path)
+            return True, f"Сообщение поставлено в очередь: {self.chat_id}"
+        except (OSError, TypeError, ValueError) as exc:
+            try:
+                tmp_path.unlink(missing_ok=True)
+            except OSError:
+                pass
+            if photo_path is not None:
+                try:
+                    Path(photo_path).unlink(missing_ok=True)
+                except OSError:
+                    pass
+            return False, f"Не удалось записать telegram_queue: {exc}"
+
     def send_text(self, text, kind="message", ttl_seconds=None):
         if not self.configured:
             return False, "Telegram не настроен: заполните TELEGRAM_BOT_TOKEN и TELEGRAM_CHANNEL в .env"
-        self.queue_dir.mkdir(parents=True, exist_ok=True)
         created = time.time()
         payload = {"id": uuid.uuid4().hex, "created_ts": created, "channel": self.chat_id,
                    "text": str(text), "kind": kind, "attempts": 0}
         if ttl_seconds is not None:
             payload["ttl_seconds"] = int(ttl_seconds)
-        filename = f"{int(created * 1000)}_{payload['id']}.json"
-        final_path = self.queue_dir / filename
-        tmp_path = final_path.with_suffix(".json.tmp")
-        try:
-            tmp_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-            os.replace(tmp_path, final_path)
-            return True, f"Сообщение поставлено в очередь: {self.chat_id}"
-        except OSError as exc:
-            try:
-                tmp_path.unlink(missing_ok=True)
-            except OSError:
-                pass
-            return False, f"Не удалось записать telegram_queue: {exc}"
+        return self._enqueue(payload)
 
     def send_photo(self, image_path, caption, kind="SIGNAL_CARD", ttl_seconds=300, metadata=None):
         if not self.configured:
             return False, "Telegram не настроен"
-        self.queue_dir.mkdir(parents=True, exist_ok=True)
+        photo = Path(image_path).resolve()
+        queue_root = self.queue_dir.resolve()
+        try:
+            photo.relative_to(queue_root)
+        except ValueError:
+            return False, "Фотография должна находиться внутри telegram_queue"
+        if not photo.is_file():
+            return False, "Файл карточки не найден"
         created = time.time()
         payload = {"id": uuid.uuid4().hex, "created_ts": created, "channel": self.chat_id,
-                   "text": str(caption), "kind": kind, "photo_path": str(Path(image_path).resolve()),
+                   "text": str(caption), "kind": kind, "photo_path": str(photo),
                    "attempts": 0, "ttl_seconds": int(ttl_seconds)}
         if isinstance(metadata, dict):
             # Только компактные поля события. Свечи и другие большие массивы в очередь не копируем.
             payload["metadata"] = metadata
-        filename = f"{int(created * 1000)}_{payload['id']}.json"
-        final_path = self.queue_dir / filename
-        tmp_path = final_path.with_suffix(".json.tmp")
-        try:
-            tmp_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-            os.replace(tmp_path, final_path)
-            return True, f"Графическая карточка поставлена в очередь: {self.chat_id}"
-        except OSError as exc:
-            return False, f"Не удалось записать telegram_queue: {exc}"
+        return self._enqueue(payload, photo_path=photo)
 
     @staticmethod
     def _fetch_closed_futures_candles(symbol: str, limit: int = 80):
