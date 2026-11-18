@@ -37,6 +37,43 @@ class TelegramNotifierTests(unittest.TestCase):
             self.assertEqual(item["text"], "hello")
             self.assertEqual(item["kind"], "OPEN")
 
+    def test_queue_write_failure_removes_temporary_file(self):
+        with tempfile.TemporaryDirectory() as folder:
+            notifier = TelegramNotifier(token="123:abc", chat_id="@test_channel")
+            notifier.queue_dir = Path(folder) / "telegram_queue"
+            with patch("crypto_setup_analyzer.telegram_notifier.os.replace", side_effect=OSError("disk full")):
+                ok, message = notifier.send_text("hello")
+            self.assertFalse(ok)
+            self.assertIn("disk full", message)
+            self.assertEqual(list(notifier.queue_dir.iterdir()), [])
+
+    def test_send_photo_rejects_files_outside_queue(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            notifier = TelegramNotifier(token="123:abc", chat_id="@test_channel")
+            notifier.queue_dir = root / "telegram_queue"
+            notifier.queue_dir.mkdir()
+            outside = root / "outside.png"
+            outside.write_bytes(b"png")
+            ok, message = notifier.send_photo(outside, "caption")
+            self.assertFalse(ok)
+            self.assertIn("внутри telegram_queue", message)
+            self.assertTrue(outside.exists())
+            self.assertEqual(list(notifier.queue_dir.iterdir()), [])
+
+    def test_queue_serialization_failure_removes_photo_and_temp_file(self):
+        with tempfile.TemporaryDirectory() as folder:
+            notifier = TelegramNotifier(token="123:abc", chat_id="@test_channel")
+            notifier.queue_dir = Path(folder) / "telegram_queue"
+            notifier.queue_dir.mkdir()
+            photo = notifier.queue_dir / "card.png"
+            photo.write_bytes(b"png")
+            ok, message = notifier.send_photo(photo, "caption", metadata={"bad": object()})
+            self.assertFalse(ok)
+            self.assertIn("serializable", message.lower())
+            self.assertFalse(photo.exists())
+            self.assertEqual(list(notifier.queue_dir.iterdir()), [])
+
     def test_level_alert_uses_real_futures_candles_and_five_minute_ttl(self):
         candles = []
         price = 1.0
