@@ -177,12 +177,40 @@ def _finish_archived_delivery(path, item):
     return True
 
 
+def _remove_queued_photo(item):
+    """Удаляет только локальную карточку, принадлежащую каталогу очереди."""
+    photo_name = item.get("photo_path")
+    if not photo_name:
+        return
+    try:
+        os.remove(_validated_photo_path(photo_name))
+    except (OSError, RuntimeError):
+        pass
+
+
+def _quarantine_corrupt_item(path, reason):
+    """Убирает повреждённый JSON из активной очереди, сохраняя его для разбора."""
+    failed_dir = os.path.join(QUEUE_DIR, "failed")
+    try:
+        os.makedirs(failed_dir, exist_ok=True)
+        name = os.path.basename(path)
+        target = os.path.join(failed_dir, f"{int(time.time() * 1000)}_{name}")
+        suffix = 1
+        while os.path.exists(target):
+            target = os.path.join(failed_dir, f"{int(time.time() * 1000)}_{suffix}_{name}")
+            suffix += 1
+        os.replace(path, target)
+        log(f"[QUEUE QUARANTINED] {name}: {reason}; сохранено: {target}")
+    except OSError as exc:
+        log(f"[BRIDGE ERROR] Cannot quarantine {os.path.basename(path)}: {exc}")
+
+
 def process_file(path, token, default_channel):
     try:
         with open(path, "r", encoding="utf-8-sig") as f:
             item = json.load(f)
     except Exception as exc:
-        log(f"[BRIDGE ERROR] Cannot read {os.path.basename(path)}: {exc}")
+        _quarantine_corrupt_item(path, exc)
         return
     # Если Telegram уже подтвердил доставку, повторяем только архивирование.
     # TTL и отправка здесь больше не применяются.
@@ -196,6 +224,7 @@ def process_file(path, token, default_channel):
     if ttl is None and item.get("kind") in ("LEVEL_APPROACH", "APPROACH", "PROXIMITY", "ALERT"):
         ttl = DEFAULT_TTL_SECONDS
     if ttl is not None and now - created > float(ttl):
+        _remove_queued_photo(item)
         try:
             os.remove(path)
         except OSError:
