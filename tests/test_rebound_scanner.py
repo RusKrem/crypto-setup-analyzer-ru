@@ -1,6 +1,6 @@
 import unittest
 from unittest.mock import patch
-from crypto_setup_analyzer.rebound_scanner import scan_symbol, ReboundScanner, ALERT_DISTANCE_PCT
+from crypto_setup_analyzer.rebound_scanner import (scan_symbol, ReboundScanner, ALERT_DISTANCE_PCT, _validate_klines)
 
 class ReboundScannerTests(unittest.TestCase):
     def test_warns_when_price_is_approaching_level(self):
@@ -76,6 +76,31 @@ class ReboundScannerTests(unittest.TestCase):
         self.assertLessEqual(names, {"PWH", "PWL", "PDH", "PDL", "Today High", "Today Low"})
         self.assertEqual(len(levels), 6)
 
+
+    def test_rest_fallback_does_not_overwrite_recent_websocket_price(self):
+        updates = []
+        scanner = ReboundScanner(lambda message: None, lambda signal: None,
+                                 on_price_update=updates.append)
+        scanner._symbols = ["TESTUSDT"]
+        scanner._levels_cache["TESTUSDT"] = [("PDL", 100.0, "Предыдущий день")]
+        import time
+        scanner._last_ws_price_at["TESTUSDT"] = time.time()
+        scanner._handle_price("TESTUSDT", 100.3, source="rest")
+        self.assertEqual(updates, [])
+        scanner._handle_price("TESTUSDT", 100.3, source="websocket")
+        self.assertEqual(len(updates), 1)
+
+    def test_binance_klines_reject_out_of_order_and_invalid_ohlc(self):
+        valid = [
+            [0, "100", "102", "99", "101", "10", 59999],
+            [60000, "101", "103", "100", "102", "11", 119999],
+        ]
+        self.assertEqual(_validate_klines(valid, "TESTUSDT", "1m"), valid)
+        with self.assertRaises(ValueError):
+            _validate_klines([valid[1], valid[0]], "TESTUSDT", "1m")
+        invalid = [[0, "100", "98", "99", "101", "10", 59999]]
+        with self.assertRaises(ValueError):
+            _validate_klines(invalid, "TESTUSDT", "1m")
 
     def test_websocket_price_event_emits_approach_and_price_update(self):
         signals = []
