@@ -383,6 +383,48 @@ class ReboundScannerTests(unittest.TestCase):
             open_time_ms=1_002_000,
         ))
 
+    def test_confirmation_requires_an_active_approach_cycle(self):
+        scanner = ReboundScanner(lambda message: None, lambda signal: None)
+        key = scanner._alert_key("TESTUSDT", "PDH")
+        candle = [1_002_000, "99", "101", "98.5", "99.2", "1", 1_061_999]
+        scanner._approach_started[key] = 1000.0
+        self.assertIsNone(
+            scanner._claim_confirmation(key, candle, 100.0, "SHORT", now=1063.0)
+        )
+        self.assertNotIn(key, scanner._confirmed_alerts)
+
+    def test_confirmation_claims_only_once_per_candle_and_cycle(self):
+        scanner = ReboundScanner(lambda message: None, lambda signal: None)
+        key = scanner._alert_key("TESTUSDT", "PDH")
+        candle = [1_002_000, "99", "101", "98.5", "99.2", "1", 1_061_999]
+        scanner._active_alerts.add(key)
+        scanner._approach_started[key] = 1000.0
+        first = scanner._claim_confirmation(
+            key, candle, 100.0, "SHORT", now=1063.0
+        )
+        second = scanner._claim_confirmation(
+            key, candle, 100.0, "SHORT", now=1063.0
+        )
+        self.assertIsNotNone(first)
+        self.assertIsNone(second)
+        self.assertIn(key, scanner._confirmed_alerts)
+
+    def test_failed_confirmation_callback_can_be_retried(self):
+        scanner = ReboundScanner(lambda message: None, lambda signal: None)
+        key = scanner._alert_key("TESTUSDT", "PDH")
+        candle = [1_002_000, "99", "101", "98.5", "99.2", "1", 1_061_999]
+        scanner._active_alerts.add(key)
+        scanner._approach_started[key] = 1000.0
+        first = scanner._claim_confirmation(
+            key, candle, 100.0, "SHORT", now=1063.0
+        )
+        self.assertIsNotNone(first)
+        scanner._release_confirmation_claim(key, int(candle[6]))
+        retry = scanner._claim_confirmation(
+            key, candle, 100.0, "SHORT", now=1063.0
+        )
+        self.assertIsNotNone(retry)
+
     def test_confirmation_rejects_approach_older_than_five_minutes(self):
         scanner = ReboundScanner(lambda message: None, lambda signal: None)
         self.assertFalse(scanner._is_confirmation_fresh(
