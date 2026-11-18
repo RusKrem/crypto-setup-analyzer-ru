@@ -156,5 +156,105 @@ class BridgeObserverIntegrationTests(unittest.TestCase):
                     bridge._validated_photo_path(str(link))
 
 
+    def test_valid_json_with_invalid_queue_shape_is_quarantined(self):
+        cases = (
+            ["not", "an", "object"],
+            {"id": "bad-attempts", "attempts": "many", "text": "x"},
+            {"id": "bad-sent-flag", "telegram_sent": "yes", "text": "x"},
+            {"id": "bad-created", "created_ts": float("nan"), "text": "x"},
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            queue = base / "telegram_queue"
+            queue.mkdir()
+            with patch.object(bridge, "QUEUE_DIR", str(queue)), \
+                 patch.object(bridge, "LOG_FILE", str(base / "bridge.log")), \
+                 patch.object(bridge.urllib.request, "urlopen") as telegram_mock:
+                for index, payload in enumerate(cases):
+                    message = queue / f"invalid-{index}.json"
+                    message.write_text(json.dumps(payload), encoding="utf-8")
+                    bridge.process_file(str(message), "123:token", "@test_channel")
+                    self.assertFalse(message.exists())
+                quarantined = list((queue / "failed").glob("*.json"))
+                self.assertEqual(len(quarantined), len(cases))
+                telegram_mock.assert_not_called()
+
+    def test_queue_state_write_failure_cleans_temporary_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = str(Path(tmp) / "delivery.json")
+            with patch.object(bridge.os, "replace", side_effect=OSError("disk full")):
+                with self.assertRaises(OSError):
+                    bridge._save_queue_item(path, {"id": "write-failure"})
+            self.assertFalse(Path(path + ".tmp").exists())
+
+    def test_archive_retry_with_photo_preserves_source_until_observer_success(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            queue = base / "telegram_queue"
+            queue.mkdir()
+            photo = queue / "card.png"
+            photo.write_bytes(b"card-bytes")
+            message = queue / "message.json"
+            message.write_text(json.dumps({
+                "id": "photo-retry", "created_ts": 1700000000,
+                "kind": "REACTION_CONFIRMED", "text": "ZECUSDT · LONG",
+                "photo_path": str(photo),
+            }), encoding="utf-8")
+            response = {"ok": True, "result": {"message_id": 88, "chat": {"id": -10088}}}
+            with patch.object(bridge, "BASE_DIR", str(base)), \
+                 patch.object(bridge, "QUEUE_DIR", str(queue)), \
+                 patch.object(bridge, "LOG_FILE", str(base / "bridge.log")), \
+                 patch.object(bridge, "archive_delivery", side_effect=[RuntimeError("db busy"), True]) as archive_mock, \
+                 patch.object(bridge.urllib.request, "urlopen", return_value=FakeResponse(response)) as telegram_mock:
+                bridge.process_file(str(message), "123:token", "@test_channel")
+                self.assertTrue(message.exists())
+                self.assertTrue(photo.exists())
+                self.assertTrue(json.loads(message.read_text(encoding="utf-8"))["telegram_sent"])
+                pending = json.loads(message.read_text(encoding="utf-8"))
+                pending["archive_next_attempt_ts"] = 0
+                message.write_text(json.dumps(pending), encoding="utf-8")
+
+                bridge.process_file(str(message), "123:token", "@test_channel")
+
+                self.assertFalse(message.exists())
+                self.assertFalse(photo.exists())
+                self.assertEqual(telegram_mock.call_count, 1)
+                self.assertEqual(archive_mock.call_count, 2)
+                archived_media = list((base / "observer_data" / "media").glob("*"))
+                # В этом тесте Observer имитирован, поэтому исходная карточка
+                # удаляется только после успешного возврата archive_delivery.
+                self.assertEqual(archived_media, [])
+
+    def test_queue_cleanup_permission_error_does_not_crash_or_resend(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            queue = base / "telegram_queue"
+            queue.mkdir()
+            message = queue / "message.json"
+            message.write_text(json.dumps({
+                "id": "cleanup-retry", "created_ts": 1700000000,
+                "kind": "LEVEL_APPROACH", "text": "ZECUSDT · LONG",
+            }), encoding="utf-8")
+            response = {"ok": True, "result": {"message_id": 89, "chat": {"id": -10089}}}
+            real_remove = bridge.os.remove
+            with patch.object(bridge, "BASE_DIR", str(base)), \
+                 patch.object(bridge, "QUEUE_DIR", str(queue)), \
+                 patch.object(bridge, "LOG_FILE", str(base / "bridge.log")), \
+                 patch.object(bridge, "archive_delivery", return_value=True), \
+                 patch.object(bridge.urllib.request, "urlopen", return_value=FakeResponse(response)) as telegram_mock:
+                def fail_queue_remove(path):
+                    if str(path) == str(message):
+                        raise PermissionError("file busy")
+                    return real_remove(path)
+                with patch.object(bridge.os, "remove", side_effect=fail_queue_remove):
+                    bridge.process_file(str(message), "123:token", "@test_channel")
+                self.assertTrue(message.exists())
+                self.assertTrue(json.loads(message.read_text(encoding="utf-8"))["telegram_sent"])
+
+                bridge.process_file(str(message), "123:token", "@test_channel")
+                self.assertFalse(message.exists())
+                self.assertEqual(telegram_mock.call_count, 1)
+
+
 if __name__ == "__main__":
     unittest.main()
