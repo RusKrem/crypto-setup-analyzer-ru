@@ -84,6 +84,10 @@ class BridgeObserverIntegrationTests(unittest.TestCase):
                 self.assertEqual(pending["telegram_result"]["result"]["message_id"], 78)
                 self.assertEqual(telegram_mock.call_count, 1)
 
+                # В тесте снимаем backoff, чтобы проверить повторный проход сразу.
+                pending["archive_next_attempt_ts"] = 0
+                message.write_text(json.dumps(pending), encoding="utf-8")
+
                 archive_mock.side_effect = None
                 archive_mock.return_value = True
                 bridge.process_file(str(message), "123:token", "@test_channel")
