@@ -201,10 +201,11 @@ class BridgeObserverIntegrationTests(unittest.TestCase):
                 "photo_path": str(photo),
             }), encoding="utf-8")
             response = {"ok": True, "result": {"message_id": 88, "chat": {"id": -10088}}}
+            real_archive = bridge.archive_delivery
             with patch.object(bridge, "BASE_DIR", str(base)), \
                  patch.object(bridge, "QUEUE_DIR", str(queue)), \
                  patch.object(bridge, "LOG_FILE", str(base / "bridge.log")), \
-                 patch.object(bridge, "archive_delivery", side_effect=[RuntimeError("db busy"), True]) as archive_mock, \
+                 patch.object(bridge, "archive_delivery", side_effect=[RuntimeError("db busy"), real_archive]) as archive_mock, \
                  patch.object(bridge.urllib.request, "urlopen", return_value=FakeResponse(response)) as telegram_mock:
                 bridge.process_file(str(message), "123:token", "@test_channel")
                 self.assertTrue(message.exists())
@@ -221,9 +222,8 @@ class BridgeObserverIntegrationTests(unittest.TestCase):
                 self.assertEqual(telegram_mock.call_count, 1)
                 self.assertEqual(archive_mock.call_count, 2)
                 archived_media = list((base / "observer_data" / "media").glob("*"))
-                # В этом тесте Observer имитирован, поэтому исходная карточка
-                # удаляется только после успешного возврата archive_delivery.
-                self.assertEqual(archived_media, [])
+                self.assertEqual(len(archived_media), 1)
+                self.assertEqual(archived_media[0].read_bytes(), b"card-bytes")
 
     def test_queue_cleanup_permission_error_does_not_crash_or_resend(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -232,7 +232,7 @@ class BridgeObserverIntegrationTests(unittest.TestCase):
             queue.mkdir()
             message = queue / "message.json"
             message.write_text(json.dumps({
-                "id": "cleanup-retry", "created_ts": 1700000000,
+                "id": "cleanup-retry", "created_ts": bridge.time.time(),
                 "kind": "LEVEL_APPROACH", "text": "ZECUSDT · LONG",
             }), encoding="utf-8")
             response = {"ok": True, "result": {"message_id": 89, "chat": {"id": -10089}}}
