@@ -61,7 +61,7 @@ class BridgeObserverIntegrationTests(unittest.TestCase):
             self.assertEqual(row[:3], ("ZECUSDT", "PDL", "77"))
             self.assertTrue((base / "observer_data" / row[3]).exists())
 
-    def test_observer_failure_does_not_retry_successfully_sent_message(self):
+    def test_observer_failure_retries_archive_without_resending_telegram(self):
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp)
             queue = base / "telegram_queue"
@@ -74,15 +74,45 @@ class BridgeObserverIntegrationTests(unittest.TestCase):
             with patch.object(bridge, "BASE_DIR", str(base)), \
                  patch.object(bridge, "QUEUE_DIR", str(queue)), \
                  patch.object(bridge, "LOG_FILE", str(base / "bridge.log")), \
-                 patch.object(bridge, "archive_delivery", side_effect=RuntimeError("disk full")), \
-                 patch.object(bridge.urllib.request, "urlopen", return_value=FakeResponse(response)):
+                 patch.object(bridge, "archive_delivery", side_effect=RuntimeError("disk full")) as archive_mock, \
+                 patch.object(bridge.urllib.request, "urlopen", return_value=FakeResponse(response)) as telegram_mock:
                 bridge.process_file(str(message), "123:token", "@test_channel")
 
-            self.assertFalse(message.exists())
+                self.assertTrue(message.exists())
+                pending = json.loads(message.read_text(encoding="utf-8"))
+                self.assertTrue(pending["telegram_sent"])
+                self.assertEqual(pending["telegram_result"]["result"]["message_id"], 78)
+                self.assertEqual(telegram_mock.call_count, 1)
+
+                archive_mock.side_effect = None
+                archive_mock.return_value = True
+                bridge.process_file(str(message), "123:token", "@test_channel")
+
+                self.assertFalse(message.exists())
+                self.assertEqual(telegram_mock.call_count, 1)
+                self.assertEqual(archive_mock.call_count, 2)
+
             log_text = (base / "bridge.log").read_text(encoding="utf-8")
-            self.assertIn("[OBSERVER ERROR]", log_text)
+            self.assertIn("[OBSERVER RETRY]", log_text)
             self.assertIn("[TELEGRAM SENT]", log_text)
             self.assertNotIn("[TELEGRAM RETRY]", log_text)
+
+    def test_photo_symlink_outside_queue_is_rejected(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            queue = base / "telegram_queue"
+            queue.mkdir()
+            outside = base / "outside.png"
+            outside.write_bytes(b"not-in-queue")
+            link = queue / "linked.png"
+            try:
+                link.symlink_to(outside)
+            except (OSError, NotImplementedError):
+                self.skipTest("Symlinks are unavailable in this environment")
+
+            with patch.object(bridge, "QUEUE_DIR", str(queue)):
+                with self.assertRaises(RuntimeError):
+                    bridge._validated_photo_path(str(link))
 
 
 if __name__ == "__main__":
