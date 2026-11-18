@@ -119,11 +119,28 @@ def _validated_photo_path(photo_name):
     return str(photo_path)
 
 
+def _schedule_archive_retry(path, item, reason):
+    """Сохраняет отдельный backoff для Observer, не затрагивая статус Telegram."""
+    attempts = int(item.get("archive_attempts", 0) or 0) + 1
+    delay = min(300, max(5, 2 ** min(attempts, 8)))
+    item["archive_attempts"] = attempts
+    item["archive_last_error"] = str(reason)
+    item["archive_next_attempt_ts"] = time.time() + delay
+    try:
+        _save_queue_item(path, item)
+    except Exception as state_exc:
+        log(f"[CRITICAL] Could not persist Observer retry state for {item.get('id', path)}: {state_exc}")
+
+
 def _finish_archived_delivery(path, item):
     """Повторяет только локальную архивацию уже отправленного сообщения."""
     msg_id = item.get("id", os.path.basename(path))
+    if time.time() < float(item.get("archive_next_attempt_ts", 0) or 0):
+        return False
     if archive_delivery is None:
-        log(f"[OBSERVER PENDING] id={msg_id}: observer.storage не загружен; Telegram повторно не отправляется")
+        reason = "observer.storage не загружен"
+        _schedule_archive_retry(path, item, reason)
+        log(f"[OBSERVER PENDING] id={msg_id}: {reason}; Telegram повторно не отправляется")
         return False
     try:
         added = archive_delivery(
@@ -133,9 +150,13 @@ def _finish_archived_delivery(path, item):
             sent_at=item.get("sent_ts"),
         )
     except Exception as exc:
+        _schedule_archive_retry(path, item, str(exc))
         log(f"[OBSERVER RETRY] id={msg_id}: {exc}")
         return False
 
+    item.pop("archive_attempts", None)
+    item.pop("archive_next_attempt_ts", None)
+    item.pop("archive_last_error", None)
     if added:
         log(f"[OBSERVER SAVED] kind={item.get('kind', 'message')} id={msg_id}")
     else:
