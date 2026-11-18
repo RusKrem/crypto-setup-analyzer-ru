@@ -233,33 +233,56 @@ class ReboundScanner:
         self._load_persisted_state()
 
     def _load_persisted_state(self):
-        """Восстанавливает только незавершённые подходы не старше пяти минут."""
-        if self._state_path is None or not self._state_path.is_file():
+        """Восстанавливает только корректные незавершённые подходы не старше пяти минут."""
+        if self._state_path is None:
+            return
+        temporary = self._state_path.with_suffix(self._state_path.suffix + ".tmp")
+        # Остаток временного файла означает прерванную запись. Основной JSON
+        # остаётся источником истины, поэтому orphan .tmp можно безопасно удалить.
+        try:
+            temporary.unlink(missing_ok=True)
+        except OSError:
+            pass
+        if not self._state_path.is_file():
             return
         try:
             data = json.loads(self._state_path.read_text(encoding="utf-8"))
-            if not isinstance(data, dict) or not isinstance(data.get("active", []), list):
+            if (not isinstance(data, dict) or data.get("version") != 1
+                    or not isinstance(data.get("active"), list)):
                 return
             now = time.time()
-            for entry in data.get("active", []):
+            for entry in data["active"]:
                 if not isinstance(entry, dict):
                     continue
-                key_data = entry.get("key", [])
+                key_data = entry.get("key")
                 if (not isinstance(key_data, list) or len(key_data) != 3
-                        or not isinstance(key_data[2], list)):
+                        or not all(isinstance(value, str) and value for value in key_data[:2])
+                        or not isinstance(key_data[2], list) or len(key_data[2]) != 2
+                        or not all(isinstance(value, str) and value for value in key_data[2])):
                     continue
-                key = (str(key_data[0]), str(key_data[1]), tuple(key_data[2]))
-                started = float(entry["started"])
-                if not math.isfinite(started) or not 0 <= now - started <= 300:
+                try:
+                    started = float(entry["started"])
+                    last_candle = entry.get("last_confirmed_candle")
+                    if last_candle is not None:
+                        if isinstance(last_candle, bool):
+                            continue
+                        last_candle = int(last_candle)
+                    confirmed = entry.get("confirmed", False)
+                    if not isinstance(confirmed, bool):
+                        continue
+                except (ValueError, TypeError, KeyError, OverflowError):
                     continue
+                if (not math.isfinite(started) or not 0 <= now - started <= 300
+                        or (last_candle is not None and last_candle < 0)):
+                    continue
+                key = (key_data[0], key_data[1], tuple(key_data[2]))
                 self._active_alerts.add(key)
                 self._approach_started[key] = started
-                last_candle = entry.get("last_confirmed_candle")
                 if last_candle is not None:
-                    self._last_confirmed_candle[key] = int(last_candle)
-                if entry.get("confirmed"):
+                    self._last_confirmed_candle[key] = last_candle
+                if confirmed:
                     self._confirmed_alerts.add(key)
-        except (OSError, ValueError, TypeError, KeyError, json.JSONDecodeError):
+        except (OSError, ValueError, TypeError, json.JSONDecodeError):
             # Повреждённый файл не должен останавливать сканер.
             return
 
@@ -279,12 +302,16 @@ class ReboundScanner:
                 "confirmed": key in self._confirmed_alerts,
             })
         payload = {"version": 1, "active": active}
+        temporary = self._state_path.with_suffix(self._state_path.suffix + ".tmp")
         try:
             self._state_path.parent.mkdir(parents=True, exist_ok=True)
-            temporary = self._state_path.with_suffix(self._state_path.suffix + ".tmp")
             temporary.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
             temporary.replace(self._state_path)
-        except OSError as exc:
+        except (OSError, TypeError, ValueError) as exc:
+            try:
+                temporary.unlink(missing_ok=True)
+            except OSError:
+                pass
             self.on_status(f"Не удалось сохранить состояние подходов: {str(exc)[:100]}")
 
     @property
@@ -336,7 +363,12 @@ class ReboundScanner:
                             self._levels_cache_time = {s: v for s, v in self._levels_cache_time.items() if s in symbols}
                             self._last_ws_price_at = {s: v for s, v in self._last_ws_price_at.items() if s in symbols}
                             self._last_ws_event_time = {s: v for s, v in self._last_ws_event_time.items() if s in symbols}
-                            self._active_alerts = {k for k in self._active_alerts if k[0] in symbols}
+                            tracked = set(symbols)
+                            self._active_alerts = {k for k in self._active_alerts if k[0] in tracked}
+                            self._confirmed_alerts = {k for k in self._confirmed_alerts if k[0] in tracked}
+                            self._approach_started = {k: v for k, v in self._approach_started.items() if k[0] in tracked}
+                            self._last_confirmed_candle = {k: v for k, v in self._last_confirmed_candle.items() if k[0] in tracked}
+                            self._persist_state_locked()
                         self.on_symbols(len(symbols))
                     with self._lock:
                         symbols = list(self._symbols)
