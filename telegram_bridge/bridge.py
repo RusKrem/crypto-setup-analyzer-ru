@@ -327,7 +327,12 @@ def process_file(path, token, default_channel):
     except (TypeError, ValueError) as exc:
         _quarantine_corrupt_item(path, exc)
         return
-    if item.get("delivery_state") == "sending":\n        _mark_delivery_unknown(path, item, "Bridge restarted while delivery was marked sending")\n        return\n    if item.get("delivery_state") == "delivery_unknown":\n        return\n    # Если Telegram уже подтвердил доставку, повторяем только архивирование.
+    if item.get("delivery_state") == "sending":
+        _mark_delivery_unknown(path, item, "Bridge restarted while delivery was marked sending")
+        return
+    if item.get("delivery_state") == "delivery_unknown":
+        return
+    # Если Telegram уже подтвердил доставку, повторяем только архивирование.
     # TTL и отправка здесь больше не применяются.
     if item.get("telegram_sent"):
         _finish_archived_delivery(path, item)
