@@ -79,7 +79,8 @@ class ReboundScannerWindow:
             ),
             on_price_update=lambda update: self._safe_after(self.update_price, update),
             on_confirmation=self.handle_confirmation,
-            batch_size=30, interval_seconds=3, symbol_refresh_seconds=900, levels_refresh_seconds=60
+            batch_size=30, interval_seconds=3, symbol_refresh_seconds=900, levels_refresh_seconds=60,
+            state_path=self.telegram.base_dir / "data" / "rebound_scanner_state.json"
         )
         self.window.protocol("WM_DELETE_WINDOW", self.close)
 
