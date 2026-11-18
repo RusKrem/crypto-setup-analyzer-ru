@@ -5,6 +5,7 @@ import threading
 from datetime import datetime, timedelta, timezone
 import requests
 import json
+import math
 import websocket
 
 BASE_URL = "https://fapi.binance.com"
@@ -71,57 +72,82 @@ def list_altcoin_symbols(session: requests.Session, limit: int = TOP_ALTCOINS_CO
     return [symbol for symbol, _ in ranked[:max(1, int(limit))]]
 
 
+def _validate_klines(rows, symbol: str, interval: str):
+    """Проверяет структуру и хронологию ответа Binance Klines до расчётов."""
+    if not isinstance(rows, list):
+        raise ValueError(f"Binance вернула некорректный список свечей для {symbol} {interval}")
+    validated = []
+    previous_open = None
+    for index, row in enumerate(rows):
+        if not isinstance(row, (list, tuple)) or len(row) < 7:
+            raise ValueError(f"Свеча {index} для {symbol} {interval} имеет неверный формат")
+        try:
+            open_time = int(row[0])
+            close_time = int(row[6])
+            open_price, high, low, close = map(float, (row[1], row[2], row[3], row[4]))
+            volume = float(row[5])
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise ValueError(f"Свеча {index} для {symbol} {interval} содержит некорректные значения") from exc
+        values = (open_price, high, low, close, volume)
+        if not all(math.isfinite(value) for value in values):
+            raise ValueError(f"Свеча {index} для {symbol} {interval} содержит нечисловые значения")
+        if min(open_price, high, low, close) <= 0 or volume < 0:
+            raise ValueError(f"Свеча {index} для {symbol} {interval} содержит недопустимые цены/объём")
+        if high < max(open_price, close, low) or low > min(open_price, close, high):
+            raise ValueError(f"Свеча {index} для {symbol} {interval} имеет противоречивый OHLC")
+        if close_time < open_time or (previous_open is not None and open_time <= previous_open):
+            raise ValueError(f"Свечи {symbol} {interval} идут не по времени или повторяются")
+        previous_open = open_time
+        validated.append(row)
+    return validated
+
+
 def fetch_klines(session, symbol: str, interval: str, limit: int):
     response = session.get(f"{BASE_URL}/fapi/v1/klines",
                            params={"symbol": symbol, "interval": interval, "limit": limit}, timeout=12)
     response.raise_for_status()
-    return response.json()
+    return _validate_klines(response.json(), symbol, interval)
 
 
 def _levels(session, symbol):
-    """Возвращает только шесть уровней: high/low предыдущей недели, предыдущего и текущего дня."""
+    """Строит уровни только по свечам точных UTC-периодов; неполные окна пропускаются."""
     daily = fetch_klines(session, symbol, "1d", 16)
     now = datetime.now(timezone.utc)
-    levels = []
+    today = now.date()
+    previous_date = today - timedelta(days=1)
+    today_start = datetime.combine(today, datetime.min.time(), tzinfo=timezone.utc)
+    previous_week_start = today_start - timedelta(days=today.weekday() + 7)
+    previous_week_dates = {
+        previous_week_start.date() + timedelta(days=offset) for offset in range(7)
+    }
+    by_date = {}
+    for candle in daily:
+        candle_date = datetime.fromtimestamp(int(candle[0]) / 1000, timezone.utc).date()
+        by_date[candle_date] = candle
 
-    # Binance возвращает дневную свечу текущего дня последней; она используется только для диапазона сегодня.
-    if len(daily) >= 2:
-        previous_day = daily[-2]
+    levels = []
+    previous_day = by_date.get(previous_date)
+    if previous_day is not None:
         levels.extend([
             ("PDH", float(previous_day[2]), "Предыдущий день"),
             ("PDL", float(previous_day[3]), "Предыдущий день"),
         ])
 
-    # Берём только полностью завершённые дневные свечи предыдущей календарной недели UTC.
-    # Не используем текущую неделю, чтобы недельные уровни не двигались внутри недели.
-    completed_days = daily[:-1]
-    previous_week_days = []
-    for candle in completed_days:
-        candle_date = datetime.fromtimestamp(int(candle[0]) / 1000, timezone.utc).date()
-        days_since_monday = candle_date.weekday()
-        week_start = candle_date.fromordinal(candle_date.toordinal() - days_since_monday)
-        current_week_start = now.date().fromordinal(now.date().toordinal() - now.weekday())
-        if week_start < current_week_start and (current_week_start - week_start).days == 7:
-            previous_week_days.append(candle)
-    if previous_week_days:
+    # Недельный диапазон допустим только при наличии всех семи дневных свечей.
+    if previous_week_dates.issubset(by_date):
+        previous_week_days = [by_date[day] for day in sorted(previous_week_dates)]
         levels.extend([
             ("PWH", max(float(c[2]) for c in previous_week_days), "Предыдущая неделя"),
             ("PWL", min(float(c[3]) for c in previous_week_days), "Предыдущая неделя"),
         ])
 
-    current_day_candles = []
-    for candle in daily:
-        candle_date = datetime.fromtimestamp(int(candle[0]) / 1000, timezone.utc).date()
-        if candle_date == now.date():
-            current_day_candles.append(candle)
-    if current_day_candles:
+    current_day = by_date.get(today)
+    if current_day is not None:
         levels.extend([
-            ("Today High", max(float(c[2]) for c in current_day_candles), "Текущий день"),
-            ("Today Low", min(float(c[3]) for c in current_day_candles), "Текущий день"),
+            ("Today High", float(current_day[2]), "Текущий день"),
+            ("Today Low", float(current_day[3]), "Текущий день"),
         ])
 
-    # Удаляем дубликаты только при практически одинаковой цене, сохраняя названия всех шести уровней
-    # в случаях, когда уровни совпадают по цене: тип уровня важен для анализа.
     return [(name, price, group) for name, price, group in levels if price > 0]
 
 
@@ -198,6 +224,7 @@ class ReboundScanner:
         self._last_refresh = 0
         self._levels_cache = {}
         self._levels_cache_time = {}
+        self._last_ws_price_at = {}
         self._lock = threading.RLock()
 
     @property
@@ -274,7 +301,7 @@ class ReboundScanner:
                             updated = 0
                             for symbol, price in prices.items():
                                 if price > 0:
-                                    self._handle_price(symbol, price)
+                                    self._handle_price(symbol, price, source="rest")
                                     updated += 1
                             last_price_refresh = now
                             self.on_status(
@@ -321,11 +348,16 @@ class ReboundScanner:
             for key in stale_keys:
                 mapping.pop(key, None)
 
-    def _handle_price(self, symbol, price):
-        """Обрабатывает новое событие цены от Binance WebSocket."""
+    def _handle_price(self, symbol, price, source="websocket"):
+        """Обрабатывает цену; REST не перезаписывает свежие данные WebSocket."""
+        now = time.time()
         with self._lock:
             if symbol not in self._symbols:
                 return
+            if source == "rest" and now - self._last_ws_price_at.get(symbol, 0.0) < 15:
+                return
+            if source == "websocket":
+                self._last_ws_price_at[symbol] = now
             levels = list(self._levels_cache.get(symbol, []))
         if not levels or price <= 0:
             return
@@ -484,7 +516,7 @@ class ReboundScanner:
                             symbol = item.get("s")
                             if symbol in tracked:
                                 # Поле c в !ticker@arr содержит последнюю цену.
-                                self._handle_price(symbol, float(item.get("c", 0)))
+                                self._handle_price(symbol, float(item.get("c", 0)), source="websocket")
                     except Exception as exc:
                         self.on_status(f"Ошибка обработки WebSocket: {str(exc)[:100]}")
 
