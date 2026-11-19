@@ -53,6 +53,15 @@ class ServerTimeTests(unittest.TestCase):
             with self.assertRaises(RuntimeError):
                 market_data.server_time_ms()
 
+    def test_closed_candle_cutoff_fails_closed_without_exchange_time(self):
+        candles = pd.DataFrame({
+            "timestamp": pd.to_datetime([
+                "2026-01-01T00:00:00Z",
+                "2026-01-01T00:01:00Z",
+            ], utc=True),
+        })
+        self.assertEqual(len(App._closed_candles(candles, "1m")), 1)
+
     def test_closed_candle_cutoff_uses_exchange_time_not_local_clock(self):
         candles = pd.DataFrame({
             "timestamp": pd.to_datetime([
