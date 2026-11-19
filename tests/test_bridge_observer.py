@@ -370,6 +370,29 @@ class BridgeObserverIntegrationTests(unittest.TestCase):
             self.assertEqual(saved["attempts"], 1)
             self.assertFalse((queue / "failed" / "delivery_unknown").exists())
 
+
+    def test_http_5xx_is_quarantined_as_uncertain(self):
+        from urllib.error import HTTPError
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            queue = base / "telegram_queue"
+            queue.mkdir()
+            message = queue / "http-500.json"
+            message.write_text(json.dumps({"id": "http-500", "text": "test"}), encoding="utf-8")
+            error = HTTPError("https://api.telegram.org/test", 500, "Internal Server Error", {}, None)
+            with patch.object(bridge, "QUEUE_DIR", str(queue)):
+                with patch.object(bridge, "LOG_FILE", str(base / "bridge.log")):
+                    with patch.object(bridge.urllib.request, "urlopen", side_effect=error) as sender:
+                        bridge.process_file(str(message), "123:token", "@test_channel")
+                        sender.assert_called_once()
+            self.assertFalse(message.exists())
+            quarantined = list((queue / "failed" / "delivery_unknown").glob("*.json"))
+            self.assertEqual(len(quarantined), 1)
+            self.assertEqual(
+                json.loads(quarantined[0].read_text(encoding="utf-8"))["delivery_state"],
+                "delivery_unknown",
+            )
+
     def test_http_4xx_is_explicit_rejection_and_remains_retryable(self):
         from urllib.error import HTTPError
         with tempfile.TemporaryDirectory() as tmp:
