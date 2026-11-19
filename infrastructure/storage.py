@@ -62,8 +62,10 @@ class Storage:
 
     def add_reaction_event(self, event):
         """Записывает предупреждения и подтверждённые реакции для последующей статистики."""
-        import uuid
-        event_id = event.get("event_id") or uuid.uuid4().hex
+        import hashlib
+        identity = "|".join(str(event.get(key, "")) for key in
+            ("symbol", "event_type", "direction", "level_name", "time"))
+        event_id = event.get("event_id") or hashlib.sha256(identity.encode("utf-8")).hexdigest()
         with self._connect() as db:
             db.execute("""INSERT OR IGNORE INTO reaction_events
                 (event_id, symbol, direction, level_name, level, price, event_time, event_type, details)
