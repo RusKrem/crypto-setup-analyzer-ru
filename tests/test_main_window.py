@@ -47,7 +47,9 @@ class MainWindowScannerWindowTests(unittest.TestCase):
             "low": [9.0, 10.0], "close": [10.5, 11.5],
             "volume": [100.0, 200.0],
         })
-        closed = App._closed_candles(frame, "5m")
+        closed = App._closed_candles(
+            frame, "5m", exchange_now_ms=int(now.timestamp() * 1000)
+        )
         self.assertEqual(len(closed), 2)
 
     def test_existing_scanner_window_is_reused(self):
