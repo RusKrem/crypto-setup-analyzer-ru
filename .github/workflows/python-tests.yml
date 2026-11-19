@@ -60,6 +60,9 @@ jobs:
         run: |
           python -m PyInstaller --noconfirm --clean --onefile --console --paths . --name TelegramBridge --distpath telegram_bridge --workpath telegram_bridge/build --specpath telegram_bridge/build telegram_bridge/bridge.py
 
+      - name: Test Windows single-instance lock
+        run: python -m unittest tests.test_bridge_observer.BridgeObserverIntegrationTests.test_single_instance_lock_rejects_second_owner_and_releases -v
+
       - name: Verify executable
         shell: pwsh
         run: |
