@@ -5,7 +5,7 @@ The scanner writes messages to `telegram_queue` as JSON files and does not conta
 ## Setup
 1. Copy `.env.example` to `.env` in the project root.
 2. Set `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHANNEL` (for example `@your_channel`). Add the bot as an administrator with permission to post in the channel.
-3. Run `telegram_bridge\\BUILD_TELEGRAM_BRIDGE.bat` once. It creates a dedicated venv and builds a standalone EXE.
+3. Run `telegram_bridge\\BUILD_TELEGRAM_BRIDGE.bat` to build a standalone EXE. Rebuild it after Bridge source updates; the EXE does not update itself.
 4. Add only `telegram_bridge\\TelegramBridge.exe` to hide.me VPN routing. Keep the scanner outside the VPN.
 5. Run `telegram_bridge\\start_bridge.bat`, check `telegram_bridge_log.txt` for `[NETWORK] TELEGRAM API OK bot=@...`, then run `START.bat`.
 
@@ -24,3 +24,11 @@ Log: `telegram_bridge_log.txt` in the project root. DNS, TCP/443 and Bot API `ge
 
 Для просмотра отчёта за последние 24 часа запусти `observer\START_OBSERVER_REPORT.bat`. Важно: старый EXE не содержит Observer, пока его не пересобрали. На работу сканера, условия сигналов и доставку уведомлений Observer не влияет.
 \n\nДополнительные детали и правила ручной сверки: [PATCH 14: безопасность доставки Telegram](PATCH_14_TELEGRAM_DELIVERY_SAFETY_RU.md).\n
+
+## Безопасность доставки и обновление EXE
+
+После PATCH 14 Bridge сохраняет состояние отправки перед сетевым запросом. Если запрос завершился timeout, обрывом соединения, ошибкой ответа или HTTP 5xx, сообщение не отправляется повторно автоматически. JSON переносится в `telegram_queue/failed/delivery_unknown/`. Сначала проверь канал Telegram вручную. Если сообщение уже есть, не восстанавливай элемент в активную очередь. Если сообщения нет, его можно вернуть в очередь после ручной проверки, установив `delivery_state="pending"` и удалив поля подтверждённой отправки.
+
+Если Bridge перезапустился с элементом `delivery_state="sending"`, он также переводит его в ручной карантин. Файл блокировки `.telegram_bridge.lock` создаётся в корне проекта; удалять его при работающем Bridge не следует. Второй экземпляр завершится, не обрабатывая очередь.
+
+Подробности: [PATCH 14](PATCH_14_TELEGRAM_DELIVERY_SAFETY_RU.md).
