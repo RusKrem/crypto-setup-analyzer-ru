@@ -162,6 +162,9 @@ class BridgeObserverIntegrationTests(unittest.TestCase):
             {"id": "bad-attempts", "attempts": "many", "text": "x"},
             {"id": "bad-sent-flag", "telegram_sent": "yes", "text": "x"},
             {"id": "bad-created", "created_ts": float("nan"), "text": "x"},
+            {"id": "sent-without-flag", "delivery_state": "sent", "text": "x"},
+            {"id": "flag-with-pending-state", "delivery_state": "pending",
+             "telegram_sent": True, "telegram_result": {"ok": True}, "sent_ts": 1, "text": "x"},
         )
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp)
