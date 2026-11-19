@@ -541,11 +541,12 @@ class App:
         if duration is None or candles is None or len(candles) <= 1:
             return candles.copy() if candles is not None else candles
         last_open = pd.to_datetime(candles.timestamp.iloc[-1], utc=True)
-        now = (
-            pd.to_datetime(exchange_now_ms, unit="ms", utc=True)
-            if exchange_now_ms is not None else pd.Timestamp.now(tz="UTC")
-        )
-        if last_open + pd.Timedelta(milliseconds=duration) > now:
+        # Without a trusted exchange timestamp, fail closed and do not treat
+        # the latest candle as complete based on the workstation clock.
+        if exchange_now_ms is None:
+            return candles.iloc[:-1].copy().reset_index(drop=True)
+        exchange_now = pd.to_datetime(exchange_now_ms, unit="ms", utc=True)
+        if last_open + pd.Timedelta(milliseconds=duration) > exchange_now:
             return candles.iloc[:-1].copy().reset_index(drop=True)
         return candles.copy().reset_index(drop=True)
 
