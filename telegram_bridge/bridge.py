@@ -237,6 +237,22 @@ def _schedule_archive_retry(path, item, reason):
         log(f"[CRITICAL] Could not persist Observer retry state for {item.get('id', path)}: {state_exc}")
 
 
+def _mark_delivery_unknown(path, item, reason):
+    """Blocks automatic resend and preserves an ambiguous delivery for review."""
+    item["delivery_state"] = "delivery_unknown"
+    item["delivery_unknown_reason"] = str(reason)
+    try:
+        _save_queue_item(path, item)
+        failed_dir = os.path.join(QUEUE_DIR, "failed", "delivery_unknown")
+        os.makedirs(failed_dir, exist_ok=True)
+        target = os.path.join(failed_dir, os.path.basename(path))
+        if os.path.exists(target):
+            target = os.path.join(failed_dir, f"{int(time.time() * 1000)}_{os.path.basename(path)}")
+        os.replace(path, target)
+        log(f"[DELIVERY UNKNOWN] id={item.get('id', path)} moved to {target}; manual reconciliation required; automatic resend disabled")
+    except Exception as exc:
+        log(f"[CRITICAL] Could not quarantine uncertain delivery {item.get('id', path)}: {exc}")
+
 def _finish_archived_delivery(path, item):
     """Повторяет только локальную архивацию уже отправленного сообщения."""
     msg_id = item.get("id", os.path.basename(path))
