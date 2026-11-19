@@ -12,6 +12,18 @@ class SwingBacktestTests(unittest.TestCase):
                          "open": c-0.2, "high": c+0.5, "low": c-0.5, "close": c, "volume": 100})
         return pd.DataFrame(rows)
 
+    def test_outside_bar_is_not_both_high_and_low_pivot(self):
+        rows = []
+        highs = [12, 14, 15, 13, 20, 14, 13, 12, 11]
+        lows = [8, 7, 6, 5, 1, 6, 7, 8, 9]
+        for i, (high, low) in enumerate(zip(highs, lows)):
+            rows.append({
+                "timestamp": pd.Timestamp("2026-01-01", tz="UTC") + pd.Timedelta(minutes=i),
+                "open": 10, "high": high, "low": low, "close": 10, "volume": 1,
+            })
+        pivots = confirmed_structure(pd.DataFrame(rows), pivot_window=2)
+        self.assertFalse((pivots.pivot_index == 4).any())
+
     def test_confirmation_is_delayed(self):
         df = self.candles()
         pivots = confirmed_structure(df, pivot_window=2)
