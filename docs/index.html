@@ -44,9 +44,9 @@
 </div>
 
 <section id="capabilities">
-<div class="eyebrow" data-lang="ru" class="show">ФУНКЦИОНАЛ</div><div class="eyebrow" data-lang="en">CAPABILITIES</div>
+<div class="eyebrow show" data-lang="ru">ФУНКЦИОНАЛ</div><div class="eyebrow" data-lang="en">CAPABILITIES</div>
 <h2 data-lang="ru" class="show">От графического анализа до проверяемого события</h2><h2 data-lang="en">From chart analysis to reviewable events</h2>
-<p class="lead" data-lang="ru" class="show">Проект не ограничивается одним сканером. Это набор связанных инструментов для наблюдения за рынком, анализа структуры и фиксации результатов. Конкретные расчёты выполняются по реализованным правилам приложения.</p>
+<p class="lead show" data-lang="ru">Проект не ограничивается одним сканером. Это набор связанных инструментов для наблюдения за рынком, анализа структуры и фиксации результатов. Конкретные расчёты выполняются по реализованным правилам приложения.</p>
 <p class="lead" data-lang="en">The project is more than a single scanner. It is a set of connected tools for market observation, structure analysis and event recording, using the rules implemented in the application.</p>
 <div class="grid">
 <article class="card"><span class="num">01 / MARKET</span><h3 data-lang="ru" class="show">Анализ рынка</h3><h3 data-lang="en">Market analysis</h3><p data-lang="ru" class="show">График, рыночные данные Binance Futures, исторические свечи, индикаторы и уровни для анализа выбранного контракта.</p><p data-lang="en">Charts, Binance Futures market data, historical candles, indicators and reference levels for the selected contract.</p><span class="tag">REST · WebSocket · pandas</span></article>
@@ -62,9 +62,9 @@
 </section>
 
 <section id="architecture">
-<div class="eyebrow" data-lang="ru" class="show">АРХИТЕКТУРА</div><div class="eyebrow" data-lang="en">ARCHITECTURE</div>
+<div class="eyebrow show" data-lang="ru">АРХИТЕКТУРА</div><div class="eyebrow" data-lang="en">ARCHITECTURE</div>
 <h2 data-lang="ru" class="show">Разделение данных, анализа, хранения и доставки</h2><h2 data-lang="en">Data, analysis, persistence and delivery are separated</h2>
-<p class="lead" data-lang="ru" class="show">Сканер не выполняет сетевые запросы к Telegram. Доставка вынесена в отдельный Bridge, а архивирование Observer происходит после подтверждённой отправки.</p><p class="lead" data-lang="en">The scanner does not make Telegram network calls. Delivery runs in a separate Bridge, and Observer archives a notification only after confirmed delivery.</p>
+<p class="lead show" data-lang="ru">Сканер не выполняет сетевые запросы к Telegram. Доставка вынесена в отдельный Bridge, а архивирование Observer происходит после подтверждённой отправки.</p><p class="lead" data-lang="en">The scanner does not make Telegram network calls. Delivery runs in a separate Bridge, and Observer archives a notification only after confirmed delivery.</p>
 <div class="architecture">
 <div class="source"><b>Binance USDⓈ-M Futures</b><small>REST API · WebSocket · USDT-M perpetual market data</small></div><div class="down">↓</div>
 <div class="nodes">
@@ -78,14 +78,14 @@
 <div class="branch"><h3>Notification path</h3><p>Closed Futures klines → validated PNG card → local JSON queue → Telegram Bridge → Telegram Bot API → Observer archive.</p><span class="tag">telegram_notifier.py · telegram_bridge/ · observer/</span></div>
 </div>
 </div>
-<div class="note" data-lang="ru" class="show">Важная граница: неоднозначный сетевой исход отправки Telegram не приводит к автоматической повторной отправке. Такие события переводятся в delivery_unknown для ручной сверки. Telegram Bot API не предоставляет idempotency key.</div>
+<div class="note show" data-lang="ru">Важная граница: неоднозначный сетевой исход отправки Telegram не приводит к автоматической повторной отправке. Такие события переводятся в delivery_unknown для ручной сверки. Telegram Bot API не предоставляет idempotency key.</div>
 <div class="note" data-lang="en">Important boundary: an ambiguous Telegram network outcome is not automatically resent. Such events are quarantined as delivery_unknown for manual reconciliation. Telegram Bot API does not provide an idempotency key.</div>
 </section>
 
 <section id="reliability">
-<div class="eyebrow" data-lang="ru" class="show">ИНЖЕНЕРНЫЕ ИЗМЕНЕНИЯ</div><div class="eyebrow" data-lang="en">ENGINEERING WORK</div>
+<div class="eyebrow show" data-lang="ru">ИНЖЕНЕРНЫЕ ИЗМЕНЕНИЯ</div><div class="eyebrow" data-lang="en">ENGINEERING WORK</div>
 <h2 data-lang="ru" class="show">Надёжность формировалась итерациями PATCH 04–17</h2><h2 data-lang="en">Reliability improved through PATCH 04–17</h2>
-<p class="lead" data-lang="ru" class="show">Это не перечень обещаний, а краткое описание уже зафиксированных изменений в репозитории. Полная техническая история доступна в документации PATCH.</p><p class="lead" data-lang="en">This is a summary of changes recorded in the repository, not a list of promises. Detailed technical notes are available in the PATCH documents.</p>
+<p class="lead show" data-lang="ru">Это не перечень обещаний, а краткое описание уже зафиксированных изменений в репозитории. Полная техническая история доступна в документации PATCH.</p><p class="lead" data-lang="en">This is a summary of changes recorded in the repository, not a list of promises. Detailed technical notes are available in the PATCH documents.</p>
 <div class="patches">
 <div class="patch"><b>PATCH 04–06 · Lifecycle & archive</b><span>Подходы и подтверждения, повторная обработка, целостность SQLite-архива и PNG-карточек.</span></div>
 <div class="patch"><b>PATCH 07–09 · Market data & time</b><span>Проверка OHLC и UTC-окон, защита от устаревших WS-событий, биржевые временные метки.</span></div>
@@ -103,9 +103,9 @@
 </section>
 
 <section id="screenshots">
-<div class="eyebrow" data-lang="ru" class="show">ПРЕДПРОСМОТР</div><div class="eyebrow" data-lang="en">PRODUCT PREVIEW</div>
+<div class="eyebrow show" data-lang="ru">ПРЕДПРОСМОТР</div><div class="eyebrow" data-lang="en">PRODUCT PREVIEW</div>
 <h2 data-lang="ru" class="show">Скриншоты приложения и уведомлений</h2><h2 data-lang="en">Application and notification screenshots</h2>
-<p class="lead" data-lang="ru" class="show">В репозитории сохранены шесть реальных снимков версии 2.0. Они показывают интерфейс и примеры уведомлений на момент съёмки, но не демонстрируют все возможности текущего кода.</p><p class="lead" data-lang="en">The repository contains six authentic captures from version 2.0. They show the interface and notification examples as captured, but do not demonstrate every capability in the current code.</p>
+<p class="lead show" data-lang="ru">В репозитории сохранены шесть реальных снимков версии 2.0. Они показывают интерфейс и примеры уведомлений на момент съёмки, но не демонстрируют все возможности текущего кода.</p><p class="lead" data-lang="en">The repository contains six authentic captures from version 2.0. They show the interface and notification examples as captured, but do not demonstrate every capability in the current code.</p>
 <div class="shots">
 <figure class="shot wide"><img src="screenshots/01-main-window.png" alt="Главное окно Crypto Setup Analyzer RU"><figcaption><b>01 · Main analyzer</b><span data-lang="ru" class="show">Главное окно анализатора</span><span data-lang="en">Main analysis window</span></figcaption></figure>
 <figure class="shot wide"><img src="screenshots/02-rebound-scanner.png" alt="Сканер отскоков Binance Futures"><figcaption><b>02 · Rebound scanner</b><span data-lang="ru" class="show">Сканер альткоинов Binance Futures USDT-M</span><span data-lang="en">Binance Futures USDT-M altcoin scanner</span></figcaption></figure>
@@ -114,13 +114,13 @@
 <figure class="shot wide"><img src="screenshots/05-confirmed-reaction-card.png" alt="Карточка подтверждённой реакции"><figcaption><b>05 · Confirmed reaction card</b><span data-lang="ru" class="show">Графическая карточка подтверждённой реакции</span><span data-lang="en">Visual confirmed-reaction card</span></figcaption></figure>
 <figure class="shot wide"><img src="screenshots/06-approach-card.png" alt="Карточка приближения к уровню"><figcaption><b>06 · Approach card</b><span data-lang="ru" class="show">Графическая карточка приближения к уровню</span><span data-lang="en">Visual level-approach card</span></figcaption></figure>
 </div>
-<div class="note" data-lang="ru" class="show">Скриншоты не являются торговыми рекомендациями. Новые снимки Observer и обновлённого главного окна стоит добавить после отдельной проверки приложения в Windows.</div><div class="note" data-lang="en">Screenshots are not trading recommendations. New captures of Observer and the updated main window should be added after a separate Windows application review.</div>
+<div class="note show" data-lang="ru">Скриншоты не являются торговыми рекомендациями. Новые снимки Observer и обновлённого главного окна стоит добавить после отдельной проверки приложения в Windows.</div><div class="note" data-lang="en">Screenshots are not trading recommendations. New captures of Observer and the updated main window should be added after a separate Windows application review.</div>
 </section>
 
 <section id="docs">
-<div class="eyebrow" data-lang="ru" class="show">ДОКУМЕНТАЦИЯ И ИСХОДНЫЙ КОД</div><div class="eyebrow" data-lang="en">DOCUMENTATION & SOURCE</div>
+<div class="eyebrow show" data-lang="ru">ДОКУМЕНТАЦИЯ И ИСХОДНЫЙ КОД</div><div class="eyebrow" data-lang="en">DOCUMENTATION & SOURCE</div>
 <h2 data-lang="ru" class="show">Изучить проект подробнее</h2><h2 data-lang="en">Explore the project</h2>
-<p class="lead" data-lang="ru" class="show">Исходный код, инструкции запуска, архитектура и история инженерных изменений доступны в открытом репозитории.</p><p class="lead" data-lang="en">Source code, setup instructions, architecture and engineering change history are available in the public repository.</p>
+<p class="lead show" data-lang="ru">Исходный код, инструкции запуска, архитектура и история инженерных изменений доступны в открытом репозитории.</p><p class="lead" data-lang="en">Source code, setup instructions, architecture and engineering change history are available in the public repository.</p>
 <div class="links">
 <a class="linkcard" href="https://github.com/RusKrem/crypto-setup-analyzer-ru" target="_blank" rel="noopener"><b>GitHub repository ↗</b><span data-lang="ru" class="show">Исходный код и структура проекта</span><span data-lang="en">Source code and project structure</span></a>
 <a class="linkcard" href="https://github.com/RusKrem/crypto-setup-analyzer-ru/blob/main/README_RU.md" target="_blank" rel="noopener"><b>README RU ↗</b><span data-lang="ru" class="show">Описание и запуск на русском языке</span><span data-lang="en">Russian overview and setup guide</span></a>
@@ -129,7 +129,7 @@
 <a class="linkcard" href="https://github.com/RusKrem/crypto-setup-analyzer-ru/blob/main/TELEGRAM_BRIDGE_SETUP_RU.md" target="_blank" rel="noopener"><b>Telegram Bridge ↗</b><span data-lang="ru" class="show">Настройка уведомлений</span><span data-lang="en">Notification setup</span></a>
 <a class="linkcard" href="https://github.com/RusKrem/crypto-setup-analyzer-ru/tree/main/observer" target="_blank" rel="noopener"><b>Observer ↗</b><span data-lang="ru" class="show">Архив уведомлений и отчёт</span><span data-lang="en">Notification archive and report</span></a>
 </div>
-<div class="note" data-lang="ru" class="show"><b>Ответственное использование.</b> Это инструмент мониторинга и исследования, а не автоматический торговый робот. Программа не размещает ордера на бирже и не заявляет о доходности. Фьючерсы на криптовалюты несут высокий риск; классификация реакции не гарантирует разворот цены.</div>
+<div class="note show" data-lang="ru"><b>Ответственное использование.</b> Это инструмент мониторинга и исследования, а не автоматический торговый робот. Программа не размещает ордера на бирже и не заявляет о доходности. Фьючерсы на криптовалюты несут высокий риск; классификация реакции не гарантирует разворот цены.</div>
 <div class="note" data-lang="en"><b>Responsible use.</b> This is a monitoring and research tool, not an automated trading system. It does not place exchange orders or claim profitability. Crypto futures are high-risk instruments; a reaction classification does not guarantee a price reversal.</div>
 </section>
 </main>
