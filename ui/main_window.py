@@ -549,7 +549,7 @@ class App:
 
     def _apply_prepared_data(self, prepared, msg, symbol=None, interval=None):
         self._data_generation += 1
-        self.df, self.events, self.reaction_events, self.order_blocks = prepared
+        self.df, self.reference_levels, self.events, self.reaction_events, self.order_blocks = prepared
         self.mtf_data = {}
         self.mtf_events = {}
         self.loaded_interval = interval or self.interval.get()
