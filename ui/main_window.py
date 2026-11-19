@@ -762,11 +762,23 @@ class App:
                 bullish_ob = str(ob.direction) == "LONG"
                 color = "#16a34a" if bullish_ob else "#dc2626"
                 lo, hi = float(ob.zone_low), float(ob.zone_high)
-                self.ax.add_patch(Rectangle((x-.45, lo), max(.15, len(df)-x-.05), max(hi-lo, 1e-12),
-                    facecolor=color, edgecolor=color, linewidth=1.0, alpha=.16, linestyle="-", zorder=1.5))
-                self.ax.hlines([lo, hi], x-.45, len(df)-.5, colors=color, linewidth=.9, alpha=.9, zorder=2)
-                add_price_tag(hi, "OB верх", color)
-                add_price_tag(lo, "OB низ", color)
+                invalidated = bool(ob.get("invalidated", False))
+                invalidated_time = ob.get("invalidated_time", None)
+                invalidated_x = (
+                    chart_x_for_time(invalidated_time)
+                    if invalidated and pd.notna(invalidated_time) else None
+                )
+                x_end = invalidated_x + .45 if invalidated_x is not None else len(df)-.5
+                style = "--" if invalidated else "-"
+                alpha = .055 if invalidated else .16
+                self.ax.add_patch(Rectangle((x-.45, lo), max(.15, x_end-x+.45), max(hi-lo, 1e-12),
+                    facecolor=color, edgecolor=color, linewidth=1.0, alpha=alpha,
+                    linestyle=style, zorder=1.5))
+                self.ax.hlines([lo, hi], x-.45, max(x+.1, x_end), colors=color,
+                    linewidth=.9, alpha=.55 if invalidated else .9, linestyles=style, zorder=2)
+                suffix = " (пробит)" if invalidated else ""
+                add_price_tag(hi, "OB верх" + suffix, color)
+                add_price_tag(lo, "OB низ" + suffix, color)
 
         # Live price line, kept independent from the historical candle close.
         self._price_line_artist = None
