@@ -58,6 +58,8 @@ class App:
         self._price_request_running = False
         self._candle_request_running = False
         self._download_request_running = False
+        self._csv_loading = False
+        self._data_generation = 0
         self._mtf_loading = False
         self._last_analysis_signature = None
         self._ui()
@@ -380,18 +382,24 @@ class App:
         def worker():
             try:
                 df = self.market_data.download_history(symbol, interval, days)
-                error = None
+                prepared = self._prepare_data(df, interval)
                 (ROOT/"data").mkdir(exist_ok=True)
                 df.to_csv(ROOT/"data"/f"{symbol.lower()}_{interval}.csv", index=False)
+                error = None
             except Exception as exc:
-                df, error = None, str(exc)
+                df, prepared, error = None, None, str(exc)
             def apply_result():
                 self._download_request_running = False
                 if error:
                     self.status.set("Не удалось загрузить данные.")
                     messagebox.showerror("Ошибка загрузки", f"{error}\n\nПопробуй позже или открой CSV.")
                     return
-                self.set_data(df, f"Загружено {len(df)} свечей {symbol} {interval}.", symbol=symbol, interval=interval)
+                self._apply_prepared_data(
+                    prepared,
+                    f"Загружено {len(df)} свечей {symbol} {interval}.",
+                    symbol=symbol,
+                    interval=interval,
+                )
             self.root.after(0, apply_result)
         threading.Thread(target=worker, daemon=True).start()
 
@@ -445,10 +453,41 @@ class App:
         threading.Thread(target=worker, daemon=True).start()
 
     def open_csv(self):
-        path=filedialog.askopenfilename(title="Выбери CSV со свечами",filetypes=[("CSV","*.csv"),("Все файлы","*.*")])
-        if not path:return
-        try:self.set_data(self.market_data.load_csv(path),f"Открыт файл {Path(path).name}.",symbol=Path(path).stem,interval="CSV")
-        except Exception as e:messagebox.showerror("Ошибка CSV",str(e))
+        path = filedialog.askopenfilename(
+            title="Выбери CSV со свечами",
+            filetypes=[("CSV", "*.csv"), ("Все файлы", "*.*")]
+        )
+        if not path:
+            return
+        if self._csv_loading:
+            self.status.set("Загрузка CSV уже выполняется…")
+            return
+        self._csv_loading = True
+        self.status.set("Читаю CSV и рассчитываю события в фоновом режиме…")
+
+        def worker():
+            try:
+                frame = self.market_data.load_csv(path)
+                prepared = self._prepare_data(frame, "CSV")
+                error = None
+            except Exception as exc:
+                frame, prepared, error = None, None, str(exc)
+
+            def apply_result():
+                self._csv_loading = False
+                if error:
+                    messagebox.showerror("Ошибка CSV", str(error))
+                    return
+                self._apply_prepared_data(
+                    prepared,
+                    f"Открыт файл {Path(path).name}.",
+                    symbol=Path(path).stem,
+                    interval="CSV",
+                )
+
+            self.root.after(0, apply_result)
+
+        threading.Thread(target=worker, daemon=True).start()
 
     @staticmethod
     def _closed_candles(candles, interval):
@@ -466,19 +505,37 @@ class App:
             return candles.iloc[:-1].copy().reset_index(drop=True)
         return candles.copy().reset_index(drop=True)
 
-    def set_data(self,df,msg,symbol=None,interval=None):
-        self.loaded_interval=interval or self.interval.get()
-        self.df=self.indicators.add_levels(df)
-        analysis_df = self._closed_candles(self.df, self.loaded_interval)
-        self.events=self.indicators.find_events(analysis_df)
-        self.reaction_events=self.indicators.find_price_reactions(analysis_df)
-        self.order_blocks=self.indicators.find_order_blocks(analysis_df)
-        self.mtf_data={}; self.mtf_events={}
-        self.loaded_symbol=symbol or self.symbol.get().strip().upper()
-        self._last_live_price=None
-        last_time=pd.to_datetime(self.df.timestamp.iloc[-1],utc=True).strftime("%Y-%m-%d %H:%M UTC")
-        self.status.set(f"{msg} Последняя свеча: {last_time}. Фактический таймфрейм: {self.loaded_interval}. Событий: {len(self.events)}. Только визуальный анализ, без ордеров.")
+    def _prepare_data(self, frame, interval):
+        """Calculate indicators off the Tk thread and return an immutable result bundle."""
+        enriched = self.indicators.add_levels(frame)
+        analysis_frame = self._closed_candles(enriched, interval)
+        return (
+            enriched,
+            self.indicators.find_events(analysis_frame),
+            self.indicators.find_price_reactions(analysis_frame),
+            self.indicators.find_order_blocks(analysis_frame),
+        )
+
+    def _apply_prepared_data(self, prepared, msg, symbol=None, interval=None):
+        self._data_generation += 1
+        self.df, self.events, self.reaction_events, self.order_blocks = prepared
+        self.mtf_data = {}
+        self.mtf_events = {}
+        self.loaded_interval = interval or self.interval.get()
+        self.loaded_symbol = symbol or self.symbol.get().strip().upper()
+        self._last_live_price = None
+        last_time = pd.to_datetime(self.df.timestamp.iloc[-1], utc=True).strftime("%Y-%m-%d %H:%M UTC")
+        self.status.set(
+            f"{msg} Последняя свеча: {last_time}. Фактический таймфрейм: "
+            f"{self.loaded_interval}. Событий: {len(self.events)}. "
+            "Только визуальный анализ, без ордеров."
+        )
         self.refresh()
+
+    def set_data(self, df, msg, symbol=None, interval=None):
+        selected_interval = interval or self.interval.get()
+        prepared = self._prepare_data(df, selected_interval)
+        self._apply_prepared_data(prepared, msg, symbol=symbol, interval=selected_interval)
 
     def refresh(self, preserve_view=False):
         old_xlim = self.ax.get_xlim() if preserve_view else None
