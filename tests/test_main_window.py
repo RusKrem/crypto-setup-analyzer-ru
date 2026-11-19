@@ -1,5 +1,6 @@
 import unittest
 from unittest.mock import patch
+import pandas as pd
 
 from ui.main_window import App
 
@@ -23,6 +24,32 @@ class FakeWindow:
 
 
 class MainWindowScannerWindowTests(unittest.TestCase):
+
+    def test_forming_candle_is_excluded_from_analysis_frame(self):
+        now = pd.Timestamp.now(tz="UTC")
+        current_open = now.floor("5min")
+        frame = pd.DataFrame({
+            "timestamp": [current_open - pd.Timedelta(minutes=5), current_open],
+            "open": [10.0, 11.0], "high": [11.0, 12.0],
+            "low": [9.0, 10.0], "close": [10.5, 11.5],
+            "volume": [100.0, 200.0],
+        })
+        closed = App._closed_candles(frame, "5m")
+        self.assertEqual(len(closed), 1)
+        self.assertEqual(float(closed.iloc[-1].close), 10.5)
+
+    def test_completed_candles_are_kept_in_analysis_frame(self):
+        now = pd.Timestamp.now(tz="UTC")
+        last_open = now.floor("5min") - pd.Timedelta(minutes=5)
+        frame = pd.DataFrame({
+            "timestamp": [last_open - pd.Timedelta(minutes=5), last_open],
+            "open": [10.0, 11.0], "high": [11.0, 12.0],
+            "low": [9.0, 10.0], "close": [10.5, 11.5],
+            "volume": [100.0, 200.0],
+        })
+        closed = App._closed_candles(frame, "5m")
+        self.assertEqual(len(closed), 2)
+
     def test_existing_scanner_window_is_reused(self):
         existing = type("ScannerWindow", (), {})()
         existing.window = FakeWindow(True)
