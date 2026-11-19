@@ -5,6 +5,7 @@
 - Перед каждым сетевым вызовом Bridge атомарно сохраняет `delivery_state="sending"`.
 - После подтверждённого ответа Bot API сохраняются `telegram_sent=true`, `delivery_state="sent"`, ответ API и время отправки.
 - Явные отказы Telegram (ответ API `ok=false` и HTTP 4xx) остаются в обычном retry с backoff.
+- Ошибки DNS и явный `ConnectionRefusedError`, доказывающие, что запрос не был отправлен, также остаются в retry.
 - Timeout, разрыв соединения, ошибка чтения/декодирования ответа и HTTP 5xx считаются неоднозначным исходом. Автоматическая повторная отправка запрещена.
 - Неоднозначные события получают `delivery_state="delivery_unknown"` и перемещаются в `telegram_queue/failed/delivery_unknown/` для ручной сверки.
 - Если Bridge перезапустился и обнаружил событие со статусом `sending`, оно также переводится в `delivery_unknown`, а не отправляется повторно.
