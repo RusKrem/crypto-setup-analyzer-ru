@@ -1,8 +1,22 @@
 import unittest
 from unittest.mock import patch
-from crypto_setup_analyzer.rebound_scanner import (scan_symbol, ReboundScanner, ALERT_DISTANCE_PCT, _validate_klines)
+from crypto_setup_analyzer.rebound_scanner import (scan_symbol, ReboundScanner, ALERT_DISTANCE_PCT, _validate_klines, _is_allowed_altcoin_contract)
 
 class ReboundScannerTests(unittest.TestCase):
+    def test_altcoin_filter_uses_exact_leveraged_suffixes(self):
+        def contract(base):
+            return {
+                "baseAsset": base, "symbol": f"{base}USDT",
+                "status": "TRADING", "quoteAsset": "USDT",
+                "contractType": "PERPETUAL",
+            }
+
+        self.assertTrue(_is_allowed_altcoin_contract(contract("SUPER")))
+        self.assertTrue(_is_allowed_altcoin_contract(contract("UPLAND")))
+        self.assertFalse(_is_allowed_altcoin_contract(contract("ETHUP")))
+        self.assertFalse(_is_allowed_altcoin_contract(contract("SOLBULL")))
+        self.assertFalse(_is_allowed_altcoin_contract(contract("BTC")))
+
     def test_active_approach_is_restored_after_scanner_restart(self):
         import tempfile
         from pathlib import Path
