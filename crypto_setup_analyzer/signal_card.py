@@ -176,6 +176,20 @@ def _draw_chart(ax, signal, candles, kind):
                     annotation_clip=True)
 
 
+def _event_summary(confirmed: bool, direction: str, level_name: str, distance: float):
+    """Describes observable market behaviour without suggesting a trade."""
+    if confirmed:
+        return (
+            "НАБЛЮДАЕМОЕ СОБЫТИЕ",
+            f"Закрытая свеча показала отвержение уровня {level_name}. "
+            f"Направление наблюдаемой реакции: {direction}.",
+        )
+    return (
+        "НАБЛЮДАЕМОЕ СОБЫТИЕ",
+        f"Цена находится рядом с уровнем {level_name}. "
+        f"Расстояние: {distance:.3f}%. Реакция пока не подтверждена.",
+    )
+
 def _render_signal_card_unlocked(signal: dict, candles: list, kind: str, output_path: str) -> str:
     """Создаёт фирменную карточку Reversal Lab для приближения или подтверждения."""
     confirmed = str(kind).upper() == "CONFIRMED"
