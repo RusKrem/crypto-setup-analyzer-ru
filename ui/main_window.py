@@ -17,6 +17,7 @@ ROOT=Path(__file__).resolve().parents[1]
 class App:
     def __init__(self, root):
         self.root=root
+        self._rebound_scanner_window = None
         self.market_data = MarketDataService()
         self.indicators = IndicatorService()
         root.title("Crypto Setup Analyzer | Визуальный анализатор")
@@ -242,8 +243,19 @@ class App:
         self.root.after(5000, self.update_live_candles)
 
     def open_rebound_scanner(self):
-        """Открывает независимое окно фонового сканирования альткоинов."""
-        ReboundScannerWindow(self.root)
+        """Открывает одно окно сканера, поднимая существующее при повторном вызове."""
+        existing = self._rebound_scanner_window
+        if existing is not None:
+            try:
+                if existing.window.winfo_exists():
+                    existing.window.deiconify()
+                    existing.window.lift()
+                    existing.window.focus_force()
+                    return existing
+            except Exception:
+                pass
+        self._rebound_scanner_window = ReboundScannerWindow(self.root)
+        return self._rebound_scanner_window
 
     def refresh_symbols(self):
         """Load the exchange symbol list in a worker so startup/UI never freezes."""
