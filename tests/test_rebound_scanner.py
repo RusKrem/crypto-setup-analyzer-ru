@@ -17,6 +17,50 @@ class ReboundScannerTests(unittest.TestCase):
         self.assertFalse(_is_allowed_altcoin_contract(contract("SOLBULL")))
         self.assertFalse(_is_allowed_altcoin_contract(contract("BTC")))
 
+    def test_symbol_list_uses_exact_suffix_filter(self):
+        from crypto_setup_analyzer.rebound_scanner import list_altcoin_symbols
+
+        class Response:
+            def __init__(self, payload):
+                self.payload = payload
+            def raise_for_status(self):
+                pass
+            def json(self):
+                return self.payload
+
+        class Session:
+            def get(self, url, **kwargs):
+                if url.endswith("exchangeInfo"):
+                    return Response({"symbols": [
+                        {"baseAsset": "SUPER", "symbol": "SUPERUSDT", "status": "TRADING",
+                         "quoteAsset": "USDT", "contractType": "PERPETUAL"},
+                        {"baseAsset": "ETHUP", "symbol": "ETHUPUSDT", "status": "TRADING",
+                         "quoteAsset": "USDT", "contractType": "PERPETUAL"},
+                    ]})
+                return Response([
+                    {"symbol": "SUPERUSDT", "quoteVolume": "5000000"},
+                    {"symbol": "ETHUPUSDT", "quoteVolume": "9000000"},
+                ])
+
+        self.assertEqual(list_altcoin_symbols(Session(), limit=10, min_quote_volume=1), ["SUPERUSDT"])
+
+    def test_stale_level_cache_is_not_used_for_price_alerts(self):
+        signals = []
+        updates = []
+        scanner = ReboundScanner(
+            lambda message: None, signals.append, on_price_update=updates.append,
+            levels_refresh_seconds=15, levels_max_age_seconds=30,
+        )
+        scanner._symbols = ["TESTUSDT"]
+        scanner._levels_cache["TESTUSDT"] = [("PDL", 100.0, "Предыдущий день")]
+        scanner._levels_cache_time["TESTUSDT"] = 1000.0
+
+        with patch("crypto_setup_analyzer.rebound_scanner.time.time", return_value=1031.0):
+            scanner._handle_price("TESTUSDT", 100.3)
+
+        self.assertEqual(signals, [])
+        self.assertEqual(updates, [])
+
     def test_active_approach_is_restored_after_scanner_restart(self):
         import tempfile
         from pathlib import Path
