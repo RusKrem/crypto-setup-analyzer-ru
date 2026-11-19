@@ -2,7 +2,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from crypto_setup_analyzer.signal_card import render_signal_card
+from crypto_setup_analyzer.signal_card import render_signal_card, _event_summary
 
 
 class SignalCardTests(unittest.TestCase):
@@ -15,6 +15,17 @@ class SignalCardTests(unittest.TestCase):
             high = max(opening, price) + 0.00003
             low = min(opening, price) - 0.00002
             self.candles.append([i * 60000, opening, high, low, price, 100, 0, 0, 0, 0, 0, 0])
+
+
+    def test_card_summary_describes_event_without_trade_advice(self):
+        title, confirmed = _event_summary(True, "LONG", "PDL", 0.12)
+        self.assertEqual(title, "НАБЛЮДАЕМОЕ СОБЫТИЕ")
+        self.assertIn("отвержение уровня PDL", confirmed)
+        self.assertIn("наблюдаемой реакции", confirmed)
+        self.assertNotIn("вход", confirmed.lower())
+        _, approach = _event_summary(False, "SHORT", "PDH", 0.25)
+        self.assertIn("Реакция пока не подтверждена", approach)
+        self.assertNotIn("вход", approach.lower())
 
     def test_approach_card_is_created(self):
         signal = {
