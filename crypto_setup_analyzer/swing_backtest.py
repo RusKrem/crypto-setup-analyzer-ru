@@ -46,10 +46,23 @@ def confirmed_structure(candles: pd.DataFrame, pivot_window: int = 5) -> pd.Data
     pivots = []
     # Экстремум становится известен только после закрытия pivot_window свечей справа.
     for i in range(pivot_window, len(df) - pivot_window):
-        if highs[i] >= highs[i-pivot_window:i].max() and highs[i] > highs[i+1:i+pivot_window+1].max():
+        is_high_pivot = (
+            highs[i] >= highs[i-pivot_window:i].max()
+            and highs[i] > highs[i+1:i+pivot_window+1].max()
+        )
+        is_low_pivot = (
+            lows[i] <= lows[i-pivot_window:i].min()
+            and lows[i] < lows[i+1:i+pivot_window+1].min()
+        )
+        # A single outside bar cannot define both sides of structure without
+        # an intrabar sequence. Exclude the ambiguous pivot instead of letting
+        # DataFrame sort order manufacture two opposite executions.
+        if is_high_pivot and is_low_pivot:
+            continue
+        if is_high_pivot:
             pivots.append({"pivot_index": i, "confirmed_index": i + pivot_window,
                            "time": df.timestamp.iloc[i], "price": float(highs[i]), "kind": "H"})
-        if lows[i] <= lows[i-pivot_window:i].min() and lows[i] < lows[i+1:i+pivot_window+1].min():
+        elif is_low_pivot:
             pivots.append({"pivot_index": i, "confirmed_index": i + pivot_window,
                            "time": df.timestamp.iloc[i], "price": float(lows[i]), "kind": "L"})
     pivots.sort(key=lambda p: (p["pivot_index"], 0 if p["kind"] == "H" else 1))
