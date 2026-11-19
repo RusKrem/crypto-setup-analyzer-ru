@@ -45,6 +45,19 @@ EXCLUDED_BASES = {
 }
 
 
+def _is_allowed_altcoin_contract(item: dict) -> bool:
+    """Accepts active USDT perpetuals and excludes exact leveraged-token suffixes."""
+    base = item.get("baseAsset", "")
+    return bool(
+        isinstance(base, str) and base
+        and item.get("symbol")
+        and item.get("status") == "TRADING"
+        and item.get("quoteAsset") == "USDT"
+        and item.get("contractType") == "PERPETUAL"
+        and base not in EXCLUDED_BASES
+        and not base.endswith(("UP", "DOWN", "BULL", "BEAR"))
+    )
+
 def list_altcoin_symbols(session: requests.Session, limit: int = TOP_ALTCOINS_COUNT,
                          min_quote_volume: float = MIN_QUOTE_VOLUME_USDT) -> list[str]:
     """Выбирает ликвидные бессрочные USDT-M фьючерсы, исключая основные монеты и стейблкоины."""
