@@ -32,7 +32,7 @@ class SwingBacktestTests(unittest.TestCase):
             backtest_hh_ll(unordered, pivot_window=2)
 
     def test_backtest_rejects_non_finite_or_impossible_costs(self):
-        for fee, slippage in ((float("nan"), 0), (0, float("inf")), (100, 0), (0, 100)):
+        for fee, slippage in ((float("nan"), 0), (0, float("inf")), (100, 0), (0, 100), ("bad", 0)):
             with self.assertRaises(ValueError):
                 backtest_hh_ll(self.candles(), pivot_window=2,
                                fee_pct=fee, slippage_pct=slippage)
