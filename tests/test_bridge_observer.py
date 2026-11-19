@@ -302,9 +302,9 @@ class BridgeObserverIntegrationTests(unittest.TestCase):
                 if len(calls) == 1:
                     raise OSError("disk temporarily unavailable")
                 return real_save(path, item)
-            with patch.object(bridge, "QUEUE_DIR", str(queue)), \\
-                 patch.object(bridge, "LOG_FILE", str(base / "bridge.log")), \\
-                 patch.object(bridge, "_save_queue_item", side_effect=fail_first_save), \\
+            with patch.object(bridge, "QUEUE_DIR", str(queue)), \
+                 patch.object(bridge, "LOG_FILE", str(base / "bridge.log")), \
+                 patch.object(bridge, "_save_queue_item", side_effect=fail_first_save), \
                  patch.object(bridge.urllib.request, "urlopen") as sender:
                 bridge.process_file(str(message), "123:token", "@test_channel")
                 sender.assert_not_called()
@@ -323,8 +323,8 @@ class BridgeObserverIntegrationTests(unittest.TestCase):
             message = queue / "dns-failure.json"
             message.write_text(json.dumps({"id": "dns-failure-1", "text": "test"}), encoding="utf-8")
             error = URLError(socket.gaierror("name resolution failed"))
-            with patch.object(bridge, "QUEUE_DIR", str(queue)), \\
-                 patch.object(bridge, "LOG_FILE", str(base / "bridge.log")), \\
+            with patch.object(bridge, "QUEUE_DIR", str(queue)), \
+                 patch.object(bridge, "LOG_FILE", str(base / "bridge.log")), \
                  patch.object(bridge.urllib.request, "urlopen", side_effect=error):
                 bridge.process_file(str(message), "123:token", "@test_channel")
             self.assertTrue(message.exists())
