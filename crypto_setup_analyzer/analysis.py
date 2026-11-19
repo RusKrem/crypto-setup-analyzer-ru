@@ -1,12 +1,59 @@
 import pandas as pd
 
+
+def _has_no_large_gaps(window, interval):
+    gaps = window["_ts"].diff().dropna()
+    return gaps.empty or bool((gaps <= interval * 1.5).all())
+
+
+def _is_complete_window(window, start, end, interval_ms):
+    """Accept a time window only when its boundaries, density and continuity are sound."""
+    if window.empty:
+        return False
+    interval = pd.Timedelta(milliseconds=interval_ms)
+    first_ts = window["_ts"].iloc[0]
+    last_ts = window["_ts"].iloc[-1]
+    if first_ts > start + interval * 1.5:
+        return False
+    if last_ts < end - interval * 1.5:
+        return False
+    expected = (end - start).total_seconds() * 1000 / interval_ms
+    if len(window) < expected * 0.95:
+        return False
+    return _has_no_large_gaps(window, interval)
+
 def add_levels(candles):
+    """Add previous-day columns only when the source contains a complete UTC day."""
     df = candles.copy()
-    df["_day"] = df.timestamp.dt.floor("D")
-    daily = df.groupby("_day").agg(day_high=("high", "max"), day_low=("low", "min"))
-    daily["PDH"] = daily.day_high.shift(1)
-    daily["PDL"] = daily.day_low.shift(1)
-    return df.join(daily[["PDH", "PDL"]], on="_day").drop(columns="_day")
+    if df.empty:
+        df["PDH"] = float("nan")
+        df["PDL"] = float("nan")
+        return df
+    work = df.copy()
+    work["_ts"] = pd.to_datetime(work["timestamp"], utc=True, errors="coerce")
+    work = work.dropna(subset=["_ts"]).sort_values("_ts")
+    deltas = work["_ts"].diff().dropna().dt.total_seconds() * 1000
+    deltas = deltas[deltas > 0]
+    df["PDH"] = float("nan")
+    df["PDL"] = float("nan")
+    if deltas.empty:
+        return df
+    interval_ms = float(deltas.median())
+    if not pd.notna(interval_ms) or interval_ms <= 0:
+        return df
+    days = sorted(work["_ts"].dt.floor("D").unique())
+    for day in days:
+        day = pd.Timestamp(day)
+        previous_start = day - pd.Timedelta(days=1)
+        previous = work[(work["_ts"] >= previous_start) & (work["_ts"] < day)]
+        if not _is_complete_window(previous, previous_start, day, interval_ms):
+            continue
+        current_mask = (pd.to_datetime(df["timestamp"], utc=True) >= day) & (
+            pd.to_datetime(df["timestamp"], utc=True) < day + pd.Timedelta(days=1)
+        )
+        df.loc[current_mask, "PDH"] = float(previous["high"].max())
+        df.loc[current_mask, "PDL"] = float(previous["low"].min())
+    return df
 
 
 def calculate_reference_levels(candles):
@@ -44,43 +91,24 @@ def calculate_reference_levels(candles):
     interval = pd.Timedelta(milliseconds=interval_ms)
     result = {}
 
-    def has_no_large_gaps(window):
-        gaps = window["_ts"].diff().dropna()
-        return gaps.empty or bool((gaps <= interval * 1.5).all())
-
     today = work[work["_ts"] >= today_start]
     # Do not call a partial or internally gapped intraday download the full range.
     if (not today.empty
             and today["_ts"].iloc[0] <= today_start + interval * 1.5
-            and has_no_large_gaps(today)):
+            and _has_no_large_gaps(today, interval)):
         result["Today High"] = float(today["high"].max())
         result["Today Low"] = float(today["low"].min())
 
-    def complete_window(window, start, end):
-        """Accept a window only when both boundaries and most candles exist."""
-        if window.empty:
-            return False
-        first_ts = window["_ts"].iloc[0]
-        last_ts = window["_ts"].iloc[-1]
-        if first_ts > start + interval * 1.5:
-            return False
-        if last_ts < end - interval * 1.5:
-            return False
-        expected = (end - start).total_seconds() * 1000 / interval_ms
-        if len(window) < expected * 0.95:
-            return False
-        return has_no_large_gaps(window)
-
     previous_day_start = today_start - pd.Timedelta(days=1)
     previous_day = work[(work["_ts"] >= previous_day_start) & (work["_ts"] < today_start)]
-    if complete_window(previous_day, previous_day_start, today_start):
+    if _is_complete_window(previous_day, previous_day_start, today_start, interval_ms):
         result["PDH"] = float(previous_day["high"].max())
         result["PDL"] = float(previous_day["low"].min())
 
     week_start = today_start - pd.Timedelta(days=today_start.weekday())
     previous_week_start = week_start - pd.Timedelta(days=7)
     previous_week = work[(work["_ts"] >= previous_week_start) & (work["_ts"] < week_start)]
-    if complete_window(previous_week, previous_week_start, week_start):
+    if _is_complete_window(previous_week, previous_week_start, week_start, interval_ms):
         result["PWH"] = float(previous_week["high"].max())
         result["PWL"] = float(previous_week["low"].min())
         result["PWC"] = float(previous_week["close"].iloc[-1])
