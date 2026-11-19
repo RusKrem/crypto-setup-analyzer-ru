@@ -68,6 +68,14 @@ class FuturesMarketDataTests(unittest.TestCase):
             self.assertEqual(market_data.realtime_price("NEARUSDT"), 5.25)
         self.assertEqual(session.calls[0][0], market_data.TICKER_PRICE_URL)
 
+
+    def test_realtime_price_rejects_non_finite_or_non_positive_values(self):
+        for value in ("nan", "inf", "0", "-1"):
+            session = FakeSession([{"symbol": "NEARUSDT", "price": value}])
+            with patch.object(market_data.requests, "Session", return_value=session):
+                with self.assertRaises(RuntimeError):
+                    market_data.realtime_price("NEARUSDT")
+
     def test_latest_candles_uses_futures_klines_endpoint(self):
         row = [1700000000000, "5", "6", "4", "5.5", "100",
                1700000299999, "0", 1, "0", "0", "0"]
