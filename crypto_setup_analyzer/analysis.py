@@ -95,10 +95,57 @@ def retain_live_history_depth(combined, previous_count, minimum_rows=500):
         return combined.reset_index(drop=True)
     return combined.tail(keep_rows).reset_index(drop=True)
 
+def _build_first_crossing_lookup(values, mode):
+    """Builds a segment tree for O(log n) first-threshold-crossing queries."""
+    if mode not in ("min", "max"):
+        raise ValueError("mode must be 'min' or 'max'")
+    values = [float(value) for value in values]
+    count = len(values)
+    neutral = float("inf") if mode == "min" else float("-inf")
+    size = 1
+    while size < count:
+        size <<= 1
+    tree = [neutral] * (2 * size)
+    for index, value in enumerate(values):
+        tree[size + index] = value
+    for index in range(size - 1, 0, -1):
+        if mode == "min":
+            tree[index] = min(tree[index * 2], tree[index * 2 + 1])
+        else:
+            tree[index] = max(tree[index * 2], tree[index * 2 + 1])
+
+    def first_crossing(start, threshold):
+        start = max(0, int(start))
+        threshold = float(threshold)
+
+        def search(node, left, right):
+            if right <= start or left >= count:
+                return None
+            extreme = tree[node]
+            if mode == "min" and extreme > threshold:
+                return None
+            if mode == "max" and extreme < threshold:
+                return None
+            if right - left == 1:
+                return left if left < count else None
+            middle = (left + right) // 2
+            found = search(node * 2, left, middle)
+            if found is not None:
+                return found
+            return search(node * 2 + 1, middle, right)
+
+        return search(1, 0, size) if start < count else None
+
+    return first_crossing
+
 def find_events(candles, lookback=20, min_fvg_pct=0.02):
     """Find visual FVG zones and liquidity sweeps; no trading signals/orders."""
     df = candles.reset_index(drop=True)
     events = []
+    lows = df.low.astype(float).tolist()
+    highs = df.high.astype(float).tolist()
+    first_low_crossing = _build_first_crossing_lookup(lows, "min")
+    first_high_crossing = _build_first_crossing_lookup(highs, "max")
 
     # FVG zones are tracked forward until fully filled. Filled zones remain in
     # the event list so the chart can show historical zones with reduced opacity.
@@ -115,12 +162,12 @@ def find_events(candles, lookback=20, min_fvg_pct=0.02):
                 zone = (lo, hi, "Bearish FVG", "SHORT")
         if zone:
             lo, hi, kind, direction = zone
-            fill_index = None
-            for j in range(i + 1, len(df)):
-                # Full fill means price has crossed the far edge of the gap.
-                if (direction == "LONG" and float(df.iloc[j].low) <= lo) or (direction == "SHORT" and float(df.iloc[j].high) >= hi):
-                    fill_index = j
-                    break
+            # Segment-tree lookup avoids scanning the entire future for every FVG.
+            fill_index = (
+                first_low_crossing(i + 1, lo)
+                if direction == "LONG"
+                else first_high_crossing(i + 1, hi)
+            )
             filled_text = f"Заполнена на свече {df.iloc[fill_index].timestamp:%Y-%m-%d %H:%M} UTC" if fill_index is not None else "Ещё не заполнена"
             events.append({
                 "index": i, "time": r.timestamp, "type": kind, "price": (lo + hi) / 2,
