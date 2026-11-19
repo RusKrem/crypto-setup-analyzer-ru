@@ -196,53 +196,81 @@ class App:
             self.status.set("Автообновление свечей выключено.")
 
     def update_live_candles(self):
-        """Загружает новые свечи в фоне и пересчитывает индикаторы только при изменениях."""
-        if self.live_candles.get() and self.df is not None and not self.df.empty and self.loaded_interval in ("1m","3m","5m","15m","30m","1h","2h","4h","1d") and not self._candle_request_running:
+        """Fetch, merge and analyse live candles in a worker; Tk only applies the result."""
+        if (
+            self.live_candles.get()
+            and self.df is not None
+            and not self.df.empty
+            and self.loaded_interval in ("1m", "3m", "5m", "15m", "30m", "1h", "2h", "4h", "1d")
+            and not self._candle_request_running
+        ):
             symbol = self.loaded_symbol or self.symbol.get().strip().upper()
             interval = self.loaded_interval
+            snapshot = self.df.copy(deep=True)
+            generation = self._data_generation
+            old_count = len(snapshot)
+            old_last = pd.to_datetime(snapshot.timestamp.iloc[-1], utc=True)
+            old_close = float(snapshot.close.iloc[-1])
+            old_high = float(snapshot.high.iloc[-1])
+            old_low = float(snapshot.low.iloc[-1])
+            old_volume = float(snapshot.volume.iloc[-1])
             self._candle_request_running = True
+
             def worker():
                 try:
                     fresh = self.market_data.latest_candles(symbol, interval, limit=3)
+                    combined = pd.concat(
+                        [snapshot.drop(columns=["PDH", "PDL"], errors="ignore"), fresh],
+                        ignore_index=True,
+                    )
+                    combined["timestamp"] = pd.to_datetime(combined["timestamp"], utc=True)
+                    combined = (
+                        combined.sort_values("timestamp")
+                        .drop_duplicates("timestamp", keep="last")
+                        .reset_index(drop=True)
+                    )
+                    combined = self.indicators.retain_live_history_depth(combined, old_count)
+                    new_last = pd.to_datetime(combined.timestamp.iloc[-1], utc=True)
+                    changed = (
+                        new_last != old_last
+                        or float(combined.close.iloc[-1]) != old_close
+                        or float(combined.high.iloc[-1]) != old_high
+                        or float(combined.low.iloc[-1]) != old_low
+                        or float(combined.volume.iloc[-1]) != old_volume
+                    )
+                    prepared = self._prepare_data(combined, interval) if changed else None
                     error = None
                 except Exception as exc:
-                    fresh, error = None, str(exc)
+                    fresh, combined, prepared, error = None, None, None, str(exc)
+                    changed = False
+                    new_last = None
+
                 def apply_result():
                     self._candle_request_running = False
                     if error:
-                        self.status.set(f"Свечи: временная ошибка соединения ({error[:90]}). Повторю попытку.")
+                        self.status.set(
+                            f"Свечи: временная ошибка соединения ({error[:90]}). Повторю попытку."
+                        )
                         return
-                    if symbol != self.loaded_symbol or interval != self.loaded_interval or self.df is None:
+                    if (
+                        generation != self._data_generation
+                        or symbol != self.loaded_symbol
+                        or interval != self.loaded_interval
+                        or self.df is None
+                    ):
                         return
-                    try:
-                        old_count = len(self.df)
-                        old_last = pd.to_datetime(self.df.timestamp.iloc[-1], utc=True)
-                        old_close = float(self.df.close.iloc[-1]); old_high = float(self.df.high.iloc[-1])
-                        old_low = float(self.df.low.iloc[-1]); old_volume = float(self.df.volume.iloc[-1])
-                        combined = pd.concat([self.df.drop(columns=["PDH","PDL"], errors="ignore"), fresh], ignore_index=True)
-                        combined["timestamp"] = pd.to_datetime(combined["timestamp"], utc=True)
-                        combined = combined.sort_values("timestamp").drop_duplicates("timestamp", keep="last").reset_index(drop=True)
-                        # Keep the same rolling history depth the user initially loaded.
-                        # A hard 1200-row cap discards days/weeks needed for PDH/PDL and PWH/PWL.
-                        combined = self.indicators.retain_live_history_depth(combined, old_count)
-                        new_last = pd.to_datetime(combined.timestamp.iloc[-1], utc=True)
-                        changed = (new_last != old_last or float(combined.close.iloc[-1]) != old_close or
-                                   float(combined.high.iloc[-1]) != old_high or float(combined.low.iloc[-1]) != old_low or
-                                   float(combined.volume.iloc[-1]) != old_volume)
-                        if not changed:
-                            return
-                        self.df = self.indicators.add_levels(combined)
-                        # Индикаторы обновляются только после фактического изменения свечей.
-                        analysis_df = self._closed_candles(self.df, interval)
-                        self.events = self.indicators.find_events(analysis_df)
-                        self.reaction_events = self.indicators.find_price_reactions(analysis_df)
-                        self.order_blocks = self.indicators.find_order_blocks(analysis_df)
-                        self.refresh(preserve_view=True)
-                        last_time = new_last.strftime("%Y-%m-%d %H:%M:%S UTC")
-                        self.status.set(f"Свечи обновлены: {symbol} {interval}. Последняя свеча: {last_time}.")
-                    except Exception as exc:
-                        self.status.set(f"Не удалось обновить график: {str(exc)[:120]}")
+                    if not changed:
+                        return
+                    self._data_generation += 1
+                    self.df, self.events, self.reaction_events, self.order_blocks = prepared
+                    self.refresh(preserve_view=True)
+                    last_time = new_last.strftime("%Y-%m-%d %H:%M:%S UTC")
+                    self.status.set(
+                        f"Свечи обновлены: {symbol} {interval}. Последняя свеча: {last_time}."
+                    )
+
                 self.root.after(0, apply_result)
+
             threading.Thread(target=worker, daemon=True).start()
         self.root.after(5000, self.update_live_candles)
 
