@@ -39,3 +39,29 @@ jobs:
 
       - name: Run unit tests
         run: python -m unittest discover -v
+
+  bridge-windows-build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install application dependencies and PyInstaller
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt pyinstaller
+
+      - name: Build Telegram Bridge executable
+        run: |
+          python -m PyInstaller --noconfirm --clean --onefile --console --paths . --name TelegramBridge --distpath telegram_bridge --workpath telegram_bridge/build --specpath telegram_bridge/build telegram_bridge/bridge.py
+
+      - name: Verify executable
+        shell: pwsh
+        run: |
+          if (!(Test-Path "telegram_bridge/TelegramBridge.exe")) { throw "TelegramBridge.exe was not produced" }
+          if ((Get-Item "telegram_bridge/TelegramBridge.exe").Length -lt 100000) { throw "TelegramBridge.exe is unexpectedly small" }
