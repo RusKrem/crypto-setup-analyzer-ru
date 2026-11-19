@@ -68,7 +68,7 @@ From the project root:
 python -m unittest discover -v
 ```
 
-The portfolio package was checked in the build environment on 4 November 2026: **23 unit tests passed**. After patches 01/02 and the Observer addition (9 November 2026), the suite contains **39 passing tests** (Python 3.13.5, pandas 2.2.3, Matplotlib 3.10.8 in the patch environment). This is not a substitute for a full GUI acceptance test on a Windows machine or a live end-to-end Telegram test in your network environment.
+The current test suite runs in GitHub Actions on Python 3.11 and 3.13. The Telegram Bridge executable is also built in a Windows CI job. These checks do not replace a full GUI acceptance test in a Windows desktop session or a live Telegram/VPN delivery test.
 
 ## Project structure
 
@@ -132,4 +132,8 @@ This repository demonstrates Python application development, API integration, We
 - [PATCH 11: Telegram delivery pipeline hardening](PATCH_11_DELIVERY_PIPELINE_RU.md)
 - [PATCH 12: Scanner lifecycle and state recovery](PATCH_12_SCANNER_LIFECYCLE_RU.md)
 - [PATCH 13: Telegram → Observer end-to-end delivery hardening](PATCH_13_TELEGRAM_OBSERVER_E2E_RU.md)
+- [PATCH 14: Telegram delivery safety and single-instance lock](PATCH_14_TELEGRAM_DELIVERY_SAFETY_RU.md)
+- [PATCH 15: Binance USDⓈ-M Futures data source consistency](PATCH_15_FUTURES_DATA_SOURCE_RU.md)
+- [PATCH 16: UI responsiveness and closed-candle lifecycle](PATCH_16_UI_CANDLE_LIFECYCLE_RU.md)
+- [PATCH 17: reliability and analysis performance](PATCH_17_RELIABILITY_PERFORMANCE_RU.md)
 - [PATCH 14: Telegram delivery safety and single-instance lock](PATCH_14_TELEGRAM_DELIVERY_SAFETY_RU.md)
