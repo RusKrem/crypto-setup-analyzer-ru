@@ -1,4 +1,5 @@
 import sqlite3
+from contextlib import closing
 import tempfile
 import time
 import unittest
@@ -66,7 +67,7 @@ class ObserverTests(unittest.TestCase):
             self.assertTrue(archive_delivery(base, item, api_result))
             self.assertTrue(photo.exists())  # Bridge сам удалит исходник после архивации.
             db = base / "observer_data" / "observer_events.sqlite3"
-            with sqlite3.connect(db) as conn:
+            with closing(sqlite3.connect(db)) as conn:
                 row = conn.execute(
                     "SELECT symbol, level_name, telegram_chat_id, telegram_message_id, media_path, price, close_position FROM events"
                 ).fetchone()
@@ -92,7 +93,7 @@ class ObserverTests(unittest.TestCase):
                       "photo_path": str(second), "text": "B", "created_ts": sent_at}
             self.assertTrue(archive_delivery(base, item_a, sent_at=sent_at))
             self.assertTrue(archive_delivery(base, item_b, sent_at=sent_at))
-            with sqlite3.connect(base / "observer_data" / "observer_events.sqlite3") as conn:
+            with closing(sqlite3.connect(base / "observer_data" / "observer_events.sqlite3")) as conn:
                 paths = [row[0] for row in conn.execute(
                     "SELECT media_path FROM events ORDER BY queue_id"
                 )]
@@ -121,7 +122,7 @@ class ObserverTests(unittest.TestCase):
             archive = base / "observer_data"
             archive.mkdir()
             db = archive / "observer_events.sqlite3"
-            with sqlite3.connect(db) as conn:
+            with closing(sqlite3.connect(db)) as conn:
                 conn.execute(
                     """CREATE TABLE events (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -143,10 +144,11 @@ class ObserverTests(unittest.TestCase):
                         media_path TEXT
                     )"""
                 )
+                conn.commit()
             item = {"id": "legacy-migration", "kind": "LEVEL_APPROACH",
                     "text": "ZECUSDT · LONG", "created_ts": time.time()}
             self.assertTrue(archive_delivery(base, item))
-            with sqlite3.connect(db) as conn:
+            with closing(sqlite3.connect(db)) as conn:
                 columns = {row[1] for row in conn.execute("PRAGMA table_info(events)")}
                 metadata = conn.execute(
                     "SELECT metadata_json FROM events WHERE queue_id=?",
