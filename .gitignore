@@ -19,3 +19,9 @@ Thumbs.db
 # Локальный архив Telegram-событий (не публиковать)
 observer_data/
 observer_last_week.csv
+
+# Local runtime state and generated market history
+.telegram_bridge.lock
+telegram_bridge_log.txt
+data/*
+!data/.gitkeep
