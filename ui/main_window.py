@@ -24,6 +24,7 @@ class App:
         root.geometry("1400x880")
         root.minsize(1000,650)
         self.df=None
+        self.reference_levels={}
         self.events=pd.DataFrame()
         self.levels=tk.BooleanVar(value=True)
         self.today_hilo=tk.BooleanVar(value=True)
@@ -262,7 +263,7 @@ class App:
                     if not changed:
                         return
                     self._data_generation += 1
-                    self.df, self.events, self.reaction_events, self.order_blocks = prepared
+                    self.df, self.reference_levels, self.events, self.reaction_events, self.order_blocks = prepared
                     self.refresh(preserve_view=True)
                     last_time = new_last.strftime("%Y-%m-%d %H:%M:%S UTC")
                     self.status.set(
@@ -540,6 +541,7 @@ class App:
         analysis_frame = self._closed_candles(enriched, interval)
         return (
             enriched,
+            self.indicators.calculate_reference_levels(enriched),
             self.indicators.find_events(analysis_frame),
             self.indicators.find_price_reactions(analysis_frame),
             self.indicators.find_order_blocks(analysis_frame),
@@ -574,7 +576,7 @@ class App:
         # Keep the full loaded history for calculations; only the candle rendering
         # window is limited to the latest 300 rows for UI responsiveness.
         history_df = self.df
-        reference_levels = self.indicators.calculate_reference_levels(history_df)
+        reference_levels = self.reference_levels
         df=history_df.tail(300).reset_index(drop=True)
         self._visible_count=len(df)
         first_time=df.timestamp.iloc[0]
