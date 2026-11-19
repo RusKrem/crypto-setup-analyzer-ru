@@ -162,7 +162,7 @@ class ObserverTests(unittest.TestCase):
             item = {"id": "same-id", "kind": "LEVEL_APPROACH", "text": "ZECUSDT · LONG"}
             self.assertTrue(archive_delivery(tmp, item, {"ok": True}))
             self.assertFalse(archive_delivery(tmp, item, {"ok": True}))
-            with sqlite3.connect(Path(tmp) / "observer_data" / "observer_events.sqlite3") as conn:
+            with closing(sqlite3.connect(Path(tmp) / "observer_data" / "observer_events.sqlite3")) as conn:
                 count = conn.execute("SELECT COUNT(*) FROM events").fetchone()[0]
             self.assertEqual(count, 1)
 
