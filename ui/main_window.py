@@ -250,7 +250,7 @@ class App:
         if getattr(self, "_symbols_loading", False):
             return
         self._symbols_loading = True
-        self.status.set("Загружаю список доступных USDT-пар Binance Spot…")
+        self.status.set("Загружаю список доступных USDT-пар Binance Futures USDⓈ-M…")
         def worker():
             try:
                 symbols = self.market_data.available_symbols()
@@ -266,7 +266,7 @@ class App:
                     self.symbols = sorted(set(symbols))
                     self.symbol_box.configure(values=self.symbols)
                     self.symbol.set(current or "NEARUSDT")
-                    self.status.set(f"Список валют загружен: {len(self.symbols)} USDT-пар Binance Spot.")
+                    self.status.set(f"Список валют загружен: {len(self.symbols)} USDT-пар Binance Futures USDⓈ-M.")
                 else:
                     self.status.set("Не удалось автоматически загрузить список валют. Можно ввести тикер вручную.")
                     # Do not show a modal dialog at startup; allow offline/manual use.
