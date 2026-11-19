@@ -253,6 +253,12 @@ def find_order_blocks(candles, structure_lookback=10, search_back=6, max_blocks=
         return pd.DataFrame()
     high = df.high.astype(float); low = df.low.astype(float)
     close = df.close.astype(float); open_ = df.open.astype(float)
+    high_values = high.tolist(); low_values = low.tolist()
+    suffix_min_low = [float("inf")] * (len(df) + 1)
+    suffix_max_high = [float("-inf")] * (len(df) + 1)
+    for index in range(len(df) - 1, -1, -1):
+        suffix_min_low[index] = min(low_values[index], suffix_min_low[index + 1])
+        suffix_max_high[index] = max(high_values[index], suffix_max_high[index + 1])
     prev_close = close.shift(1)
     tr = pd.concat([high-low, (high-prev_close).abs(), (low-prev_close).abs()], axis=1).max(axis=1)
     atr = tr.rolling(atr_period, min_periods=max(3, atr_period//2)).mean()
@@ -281,12 +287,11 @@ def find_order_blocks(candles, structure_lookback=10, search_back=6, max_blocks=
         zlo, zhi = float(c.low), float(c.high)
         if zhi <= zlo:
             continue
-        # Mark whether the zone was invalidated after its structural break.
-        future = df.iloc[i+1:]
+        # Suffix extrema avoid allocating/scanning a future DataFrame slice per block.
         if direction == "LONG":
-            invalidated = bool((future.low.astype(float) < zlo).any())
+            invalidated = suffix_min_low[i + 1] < zlo
         else:
-            invalidated = bool((future.high.astype(float) > zhi).any())
+            invalidated = suffix_max_high[i + 1] > zhi
         out.append({
             "index": candidate, "time": c.timestamp,
             "type": "Bullish OB" if direction == "LONG" else "Bearish OB",
