@@ -22,18 +22,9 @@ Crypto Setup Analyzer RU is a desktop research tool for monitoring selected Bina
 
 ## Screenshots and demo
 
-A project presentation with six authentic screenshots from the running version 2.0 is available at [docs/index.html](docs/index.html). The captures are stored in `docs/screenshots/`.
+A project presentation with authentic screenshots from the running version 2.0 is available at [docs/index.html](docs/index.html). The captures are stored in `docs/screenshots/`.
 
-
-The portfolio currently includes these captures from the running application: main analyzer, scanner table, Telegram approach and confirmed-reaction messages, plus full-size event cards. Recommended additional captures:
-
-1. Main analyzer window with the scanner running.
-2. Rebound scanner table showing live prices and distance dynamics.
-3. Telegram approach card.
-4. Telegram confirmed-reaction card.
-5. Telegram channel post showing the delivered image.
-
-Only publish screenshots with API tokens, account identifiers, private paths, and personal data removed. A short screen recording (60–90 seconds) is useful for a portfolio presentation.
+Useful future additions to the portfolio are a current main-window capture after the Futures source update, the Observer report, and a short recording of the scanner lifecycle. Only publish screenshots with API tokens, account identifiers, private paths, and personal data removed.
 
 ## Requirements
 
