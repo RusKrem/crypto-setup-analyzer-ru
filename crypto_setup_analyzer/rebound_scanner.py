@@ -67,8 +67,7 @@ def list_altcoin_symbols(session: requests.Session, limit: int = TOP_ALTCOINS_CO
     for item in info.json().get("symbols", []):
         base, symbol = item.get("baseAsset", ""), item.get("symbol", "")
         if (item.get("status") == "TRADING" and item.get("quoteAsset") == "USDT"
-                and item.get("contractType") == "PERPETUAL" and base not in EXCLUDED_BASES
-                and not any(tag in base for tag in ("UP", "DOWN", "BULL", "BEAR"))):
+                and _is_allowed_altcoin_contract(item)):
             allowed.add(symbol)
     tickers = session.get(f"{BASE_URL}/fapi/v1/ticker/24hr", timeout=20)
     tickers.raise_for_status()
@@ -213,7 +212,8 @@ class ReboundScanner:
 
     def __init__(self, on_status, on_signal, on_symbols=None, on_trade_update=None,
                  on_price_update=None, on_confirmation=None, batch_size=30, interval_seconds=3, alert_distance_pct=ALERT_DISTANCE_PCT,
-                 symbol_refresh_seconds=900, levels_refresh_seconds=60, state_path=None):
+                 symbol_refresh_seconds=900, levels_refresh_seconds=60, state_path=None,
+                 levels_max_age_seconds=None):
         self.on_status = on_status
         self.on_signal = on_signal
         self.on_symbols = on_symbols or (lambda count: None)
@@ -223,6 +223,11 @@ class ReboundScanner:
         self.interval_seconds = max(1, int(interval_seconds))
         self.symbol_refresh_seconds = max(60, int(symbol_refresh_seconds))
         self.levels_refresh_seconds = max(15, int(levels_refresh_seconds))
+        self.levels_max_age_seconds = max(
+            self.levels_refresh_seconds,
+            float(levels_max_age_seconds) if levels_max_age_seconds is not None
+            else max(180.0, self.levels_refresh_seconds * 3.0),
+        )
         self.alert_distance_pct = float(alert_distance_pct)
         self._stop = threading.Event()
         self._thread = None
@@ -493,6 +498,10 @@ class ReboundScanner:
                 self._last_ws_event_time[symbol] = event_time
                 self._last_ws_price_at[symbol] = now
             levels = list(self._levels_cache.get(symbol, []))
+            levels_updated_at = self._levels_cache_time.get(symbol)
+            if (levels and levels_updated_at is not None
+                    and now - levels_updated_at > self.levels_max_age_seconds):
+                levels = []
         if not levels:
             return
         now = time.time()
