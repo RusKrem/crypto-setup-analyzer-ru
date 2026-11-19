@@ -397,7 +397,7 @@ class App:
 
     def download(self):
         """Загружает историю в фоне, оставляя окно отзывчивым."""
-        if self._download_request_running:
+        if self._download_request_running or self._csv_loading:
             self.status.set("Загрузка уже выполняется…")
             return
         symbol = self.symbol.get().strip().upper()
@@ -406,6 +406,7 @@ class App:
         if not symbol:
             messagebox.showwarning("Нет инструмента", "Введи тикер торговой пары.")
             return
+        self._data_generation += 1
         self._download_request_running = True
         self.status.set("Загружаю исторические свечи в фоновом режиме…")
         def worker():
@@ -489,9 +490,10 @@ class App:
         )
         if not path:
             return
-        if self._csv_loading:
-            self.status.set("Загрузка CSV уже выполняется…")
+        if self._csv_loading or self._download_request_running:
+            self.status.set("Загрузка данных уже выполняется…")
             return
+        self._data_generation += 1
         self._csv_loading = True
         self.status.set("Читаю CSV и рассчитываю события в фоновом режиме…")
 
