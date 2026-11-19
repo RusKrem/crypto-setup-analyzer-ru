@@ -1,5 +1,6 @@
 import json
 import sqlite3
+from contextlib import closing
 import sys
 import tempfile
 import unittest
@@ -54,7 +55,7 @@ class BridgeObserverIntegrationTests(unittest.TestCase):
             self.assertFalse(message.exists())
             self.assertFalse(photo.exists())
             db = base / "observer_data" / "observer_events.sqlite3"
-            with sqlite3.connect(db) as conn:
+            with closing(sqlite3.connect(db)) as conn:
                 row = conn.execute(
                     "SELECT symbol, level_name, telegram_message_id, media_path FROM events"
                 ).fetchone()
