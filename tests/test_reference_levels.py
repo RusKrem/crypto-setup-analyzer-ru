@@ -4,6 +4,7 @@ import pandas as pd
 
 from crypto_setup_analyzer.analysis import (
     calculate_reference_levels,
+    add_levels,
     retain_live_history_depth,
 )
 
@@ -38,6 +39,20 @@ class ReferenceLevelTests(unittest.TestCase):
         frame.loc[frame.timestamp == pd.Timestamp("2026-11-09 01:00:00+00:00"), "high"] = 130.0
         frame.loc[frame.timestamp == pd.Timestamp("2026-11-09 02:00:00+00:00"), "low"] = 70.0
         return frame
+
+
+    def test_add_levels_uses_same_complete_previous_day_rule(self):
+        frame = self.make_history()
+        enriched = add_levels(frame)
+        current_day = enriched[enriched.timestamp.dt.date == pd.Timestamp("2026-11-09").date()]
+        self.assertTrue((current_day.PDH == 120.0).all())
+        self.assertTrue((current_day.PDL == 80.0).all())
+
+        partial = frame[frame.timestamp >= pd.Timestamp("2026-11-08 06:00:00+00:00")]
+        partial_enriched = add_levels(partial)
+        today = partial_enriched[partial_enriched.timestamp.dt.date == pd.Timestamp("2026-11-09").date()]
+        self.assertTrue(today.PDH.isna().all())
+        self.assertTrue(today.PDL.isna().all())
 
     def test_levels_use_full_history_not_last_300_candles(self):
         frame = self.make_history()
