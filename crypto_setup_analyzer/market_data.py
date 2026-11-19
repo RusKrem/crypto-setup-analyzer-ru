@@ -7,8 +7,24 @@ import pandas as pd
 URL = "https://fapi.binance.com/fapi/v1/klines"
 EXCHANGE_INFO_URL = "https://fapi.binance.com/fapi/v1/exchangeInfo"
 TICKER_PRICE_URL = "https://fapi.binance.com/fapi/v1/ticker/price"
+SERVER_TIME_URL = "https://fapi.binance.com/fapi/v1/time"
 MS = {"1m":60000,"3m":180000,"5m":300000,"15m":900000,"30m":1800000,
       "1h":3600000,"2h":7200000,"4h":14400000,"1d":86400000}
+
+def server_time_ms():
+    """Return Binance USDⓈ-M server time in milliseconds."""
+    with requests.Session() as session:
+        response = session.get(SERVER_TIME_URL, timeout=5)
+        response.raise_for_status()
+        payload = response.json()
+    try:
+        server_time = int(payload["serverTime"])
+    except (KeyError, TypeError, ValueError, OverflowError) as exc:
+        raise RuntimeError("Binance вернула некорректное серверное время.") from exc
+    if server_time <= 0:
+        raise RuntimeError("Binance вернула некорректное серверное время.")
+    return server_time
+
 
 def available_usdt_symbols():
     """Возвращает торгуемые бессрочные Binance USDⓈ-M USDT-контракты."""

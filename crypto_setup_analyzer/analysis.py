@@ -315,16 +315,27 @@ def find_order_blocks(candles, structure_lookback=10, search_back=6, max_blocks=
         zlo, zhi = float(c.low), float(c.high)
         if zhi <= zlo:
             continue
-        # Suffix extrema avoid allocating/scanning a future DataFrame slice per block.
+        # Suffix extrema provide a fast existence check; locate the first
+        # breach as well so the chart can stop the zone at its invalidation bar.
         if direction == "LONG":
             invalidated = suffix_min_low[i + 1] < zlo
+            invalidated_index = next(
+                (j for j in range(i + 1, len(df)) if low_values[j] < zlo), None
+            ) if invalidated else None
         else:
             invalidated = suffix_max_high[i + 1] > zhi
+            invalidated_index = next(
+                (j for j in range(i + 1, len(df)) if high_values[j] > zhi), None
+            ) if invalidated else None
+        invalidated_time = (
+            df.iloc[invalidated_index].timestamp if invalidated_index is not None else None
+        )
         out.append({
             "index": candidate, "time": c.timestamp,
             "type": "Bullish OB" if direction == "LONG" else "Bearish OB",
             "direction": direction, "zone_low": zlo, "zone_high": zhi,
             "break_index": i, "price": (zlo+zhi)/2, "invalidated": invalidated,
+            "invalidated_index": invalidated_index, "invalidated_time": invalidated_time,
             "details": f"OB {zlo:.6g}–{zhi:.6g}; пробой структуры {df.iloc[i].timestamp:%Y-%m-%d %H:%M} UTC; {'пробит' if invalidated else 'не инвалидирован'}"
         })
     if not out:

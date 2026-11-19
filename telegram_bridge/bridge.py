@@ -102,7 +102,11 @@ def load_env(key, default=""):
 
 def log(text):
     line = time.strftime("[%Y-%m-%d %H:%M:%S]") + " " + str(text)
-    print(line, flush=True)
+    try:
+        print(line, flush=True)
+    except UnicodeEncodeError:
+        # Windows consoles may use a legacy code page that cannot encode Cyrillic.
+        print(line.encode("ascii", errors="backslashreplace").decode("ascii"), flush=True)
     try:
         with open(LOG_FILE, "a", encoding="utf-8") as f:
             f.write(line + "\n")

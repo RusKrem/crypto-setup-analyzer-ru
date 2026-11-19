@@ -5,6 +5,9 @@ from crypto_setup_analyzer import market_data
 class MarketDataService:
     """Единая точка доступа к Binance REST и CSV-источникам."""
 
+    def server_time_ms(self):
+        return market_data.server_time_ms()
+
     def available_symbols(self):
         return market_data.available_usdt_symbols()
 

@@ -239,7 +239,14 @@ class App:
                         or float(combined.low.iloc[-1]) != old_low
                         or float(combined.volume.iloc[-1]) != old_volume
                     )
-                    prepared = self._prepare_data(combined, interval) if changed else None
+                    exchange_now_ms = (
+                        self.market_data.server_time_ms()
+                        if changed and interval != "CSV" else None
+                    )
+                    prepared = (
+                        self._prepare_data(combined, interval, exchange_now_ms=exchange_now_ms)
+                        if changed else None
+                    )
                     error = None
                 except Exception as exc:
                     fresh, combined, prepared, error = None, None, None, str(exc)
@@ -412,7 +419,8 @@ class App:
         def worker():
             try:
                 df = self.market_data.download_history(symbol, interval, days)
-                prepared = self._prepare_data(df, interval)
+                exchange_now_ms = self.market_data.server_time_ms()
+                prepared = self._prepare_data(df, interval, exchange_now_ms=exchange_now_ms)
                 (ROOT/"data").mkdir(exist_ok=True)
                 df.to_csv(ROOT/"data"/f"{symbol.lower()}_{interval}.csv", index=False)
                 error = None
@@ -522,8 +530,8 @@ class App:
         threading.Thread(target=worker, daemon=True).start()
 
     @staticmethod
-    def _closed_candles(candles, interval):
-        """Exclude the currently forming exchange candle from event calculations."""
+    def _closed_candles(candles, interval, exchange_now_ms=None):
+        """Exclude the forming candle using Binance server time when available."""
         durations = {
             "1m": 60_000, "3m": 180_000, "5m": 300_000,
             "15m": 900_000, "30m": 1_800_000, "1h": 3_600_000,
@@ -533,14 +541,19 @@ class App:
         if duration is None or candles is None or len(candles) <= 1:
             return candles.copy() if candles is not None else candles
         last_open = pd.to_datetime(candles.timestamp.iloc[-1], utc=True)
-        if last_open + pd.Timedelta(milliseconds=duration) > pd.Timestamp.now(tz="UTC"):
+        # Without a trusted exchange timestamp, fail closed and do not treat
+        # the latest candle as complete based on the workstation clock.
+        if exchange_now_ms is None:
+            return candles.iloc[:-1].copy().reset_index(drop=True)
+        exchange_now = pd.to_datetime(exchange_now_ms, unit="ms", utc=True)
+        if last_open + pd.Timedelta(milliseconds=duration) > exchange_now:
             return candles.iloc[:-1].copy().reset_index(drop=True)
         return candles.copy().reset_index(drop=True)
 
-    def _prepare_data(self, frame, interval):
+    def _prepare_data(self, frame, interval, exchange_now_ms=None):
         """Calculate indicators off the Tk thread and return an immutable result bundle."""
         enriched = self.indicators.add_levels(frame)
-        analysis_frame = self._closed_candles(enriched, interval)
+        analysis_frame = self._closed_candles(enriched, interval, exchange_now_ms=exchange_now_ms)
         return (
             enriched,
             self.indicators.calculate_reference_levels(enriched),
@@ -762,11 +775,23 @@ class App:
                 bullish_ob = str(ob.direction) == "LONG"
                 color = "#16a34a" if bullish_ob else "#dc2626"
                 lo, hi = float(ob.zone_low), float(ob.zone_high)
-                self.ax.add_patch(Rectangle((x-.45, lo), max(.15, len(df)-x-.05), max(hi-lo, 1e-12),
-                    facecolor=color, edgecolor=color, linewidth=1.0, alpha=.16, linestyle="-", zorder=1.5))
-                self.ax.hlines([lo, hi], x-.45, len(df)-.5, colors=color, linewidth=.9, alpha=.9, zorder=2)
-                add_price_tag(hi, "OB верх", color)
-                add_price_tag(lo, "OB низ", color)
+                invalidated = bool(ob.get("invalidated", False))
+                invalidated_time = ob.get("invalidated_time", None)
+                invalidated_x = (
+                    chart_x_for_time(invalidated_time)
+                    if invalidated and pd.notna(invalidated_time) else None
+                )
+                x_end = invalidated_x + .45 if invalidated_x is not None else len(df)-.5
+                style = "--" if invalidated else "-"
+                alpha = .055 if invalidated else .16
+                self.ax.add_patch(Rectangle((x-.45, lo), max(.15, x_end-x+.45), max(hi-lo, 1e-12),
+                    facecolor=color, edgecolor=color, linewidth=1.0, alpha=alpha,
+                    linestyle=style, zorder=1.5))
+                self.ax.hlines([lo, hi], x-.45, max(x+.1, x_end), colors=color,
+                    linewidth=.9, alpha=.55 if invalidated else .9, linestyles=style, zorder=2)
+                suffix = " (пробит)" if invalidated else ""
+                add_price_tag(hi, "OB верх" + suffix, color)
+                add_price_tag(lo, "OB низ" + suffix, color)
 
         # Live price line, kept independent from the historical candle close.
         self._price_line_artist = None
