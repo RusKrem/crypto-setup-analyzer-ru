@@ -1,5 +1,6 @@
 from pathlib import Path
 import time
+import math
 import requests
 import pandas as pd
 
@@ -35,7 +36,10 @@ def realtime_price(symbol="NEARUSDT"):
         payload = response.json()
     if "price" not in payload:
         raise RuntimeError(f"Binance не вернула цену для {symbol}.")
-    return float(payload["price"])
+    price = float(payload["price"])
+    if not math.isfinite(price) or price <= 0:
+        raise RuntimeError(f"Binance вернула недопустимую цену для {symbol}.")
+    return price
 
 
 def validate(df):
