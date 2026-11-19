@@ -58,6 +58,7 @@ class App:
         self._price_request_running = False
         self._candle_request_running = False
         self._download_request_running = False
+        self._mtf_loading = False
         self._last_analysis_signature = None
         self._ui()
         self._empty()
@@ -394,32 +395,53 @@ class App:
         threading.Thread(target=worker, daemon=True).start()
 
     def download_all_tf_fvg(self):
+        """Загружает и анализирует таймфреймы в worker, не блокируя Tk event loop."""
         if self.df is None or self.df.empty:
             messagebox.showinfo("Сначала загрузите свечи", "Сначала загрузите основной график, затем нажмите эту кнопку.")
             return
-        symbol=self.loaded_symbol or self.symbol.get().strip().upper()
-        days=int(self.days.get())
-        intervals=["1m","3m","5m","15m","30m","1h","2h","4h","1d"]
-        self.status.set("Загружаю свечи для FVG всех таймфреймов. Это может занять некоторое время…")
-        self.root.update_idletasks()
-        failed=[]
-        try:
+        if self._mtf_loading:
+            self.status.set("Загрузка FVG всех таймфреймов уже выполняется…")
+            return
+        symbol = self.loaded_symbol or self.symbol.get().strip().upper()
+        days = int(self.days.get())
+        intervals = ["1m", "3m", "5m", "15m", "30m", "1h", "2h", "4h", "1d"]
+        self._mtf_loading = True
+        self.status.set("Загружаю свечи для FVG всех таймфреймов в фоновом режиме…")
+
+        def worker():
+            mtf_data = {}
+            mtf_events = {}
+            failed = []
             for tf in intervals:
                 try:
-                    candles=self.market_data.download_history(symbol,tf,days)
-                    self.mtf_data[tf]=candles
-                    self.mtf_events[tf]=self.indicators.find_events(candles)
+                    candles = self.market_data.download_history(symbol, tf, days)
+                    mtf_data[tf] = candles
+                    mtf_events[tf] = self.indicators.find_events(candles)
                 except Exception as exc:
                     failed.append(f"{tf}: {exc}")
-            self.all_tf_fvg.set(True)
-            total=sum(int((ev.type.astype(str).str.contains("FVG")).sum()) for ev in self.mtf_events.values() if not ev.empty)
-            msg=f"FVG загружены для {len(self.mtf_data)} таймфреймов. Найдено зон: {total}."
-            if failed: msg += " Не удалось загрузить: " + "; ".join(failed[:3])
-            self.status.set(msg)
-            self.refresh()
-        except Exception as exc:
-            messagebox.showerror("Ошибка загрузки FVG", str(exc))
-            self.status.set("Не удалось загрузить FVG всех таймфреймов.")
+
+            def apply_result():
+                self._mtf_loading = False
+                active_symbol = self.loaded_symbol or self.symbol.get().strip().upper()
+                if active_symbol != symbol:
+                    self.status.set("Результаты FVG не применены: инструмент изменился во время загрузки.")
+                    return
+                self.mtf_data = mtf_data
+                self.mtf_events = mtf_events
+                self.all_tf_fvg.set(True)
+                total = sum(
+                    int(ev.type.astype(str).str.contains("FVG").sum())
+                    for ev in mtf_events.values() if not ev.empty
+                )
+                msg = f"FVG загружены для {len(mtf_data)} таймфреймов. Найдено зон: {total}."
+                if failed:
+                    msg += " Не удалось загрузить: " + "; ".join(failed[:3])
+                self.status.set(msg)
+                self.refresh()
+
+            self.root.after(0, apply_result)
+
+        threading.Thread(target=worker, daemon=True).start()
 
     def open_csv(self):
         path=filedialog.askopenfilename(title="Выбери CSV со свечами",filetypes=[("CSV","*.csv"),("Все файлы","*.*")])
