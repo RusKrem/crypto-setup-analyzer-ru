@@ -4,7 +4,7 @@ import socket
 import time
 import urllib.parse
 import urllib.request
-from urllib.error import HTTPError
+from urllib.error import HTTPError, URLError
 import sys
 
 if getattr(sys, "frozen", False):
@@ -241,6 +241,11 @@ def _schedule_archive_retry(path, item, reason):
         log(f"[CRITICAL] Could not persist Observer retry state for {item.get('id', path)}: {state_exc}")
 
 
+def _is_definite_pre_send_error(error):
+    """Recognize failures that prove the HTTP request never reached Telegram."""
+    reason = error.reason if isinstance(error, URLError) else error
+    return isinstance(reason, (socket.gaierror, ConnectionRefusedError))
+
 def _mark_delivery_unknown(path, item, reason):
     """Blocks automatic resend and preserves an ambiguous delivery for review."""
     item["delivery_state"] = "delivery_unknown"
@@ -415,6 +420,9 @@ def process_file(path, token, default_channel):
             _mark_delivery_unknown(path, item, f"Telegram HTTP {http_exc.code}: outcome may be ambiguous")
             return
         except Exception as network_exc:
+            if _is_definite_pre_send_error(network_exc):
+                item["delivery_state"] = "pending"
+                raise RuntimeError(f"Telegram connection failed before request send: {network_exc}") from network_exc
             _mark_delivery_unknown(path, item, f"{type(network_exc).__name__}: {network_exc}")
             return
         if not isinstance(data, dict) or not data.get("ok"):
