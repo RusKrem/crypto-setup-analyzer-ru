@@ -1,17 +1,43 @@
 """Бэктест модели HH ↔ LL без использования будущих данных при входе."""
 from __future__ import annotations
+import math
 import pandas as pd
 
 
-def confirmed_structure(candles: pd.DataFrame, pivot_window: int = 5) -> pd.DataFrame:
-    """Размечает свинги и указывает индекс свечи, на которой экстремум подтверждён."""
-    if pivot_window < 1:
-        raise ValueError("pivot_window должен быть не меньше 1")
-    df = candles.reset_index(drop=True)
+def _validate_backtest_candles(candles: pd.DataFrame) -> pd.DataFrame:
+    """Validate OHLC and strict chronological order before any swing calculations."""
+    if not isinstance(candles, pd.DataFrame):
+        raise TypeError("candles должен быть pandas.DataFrame")
     required = {"timestamp", "open", "high", "low", "close"}
-    missing = required - set(df.columns)
+    missing = required - set(candles.columns)
     if missing:
         raise ValueError("Не хватает столбцов: " + ", ".join(sorted(missing)))
+    df = candles.reset_index(drop=True).copy()
+    df["timestamp"] = pd.to_datetime(df["timestamp"], utc=True, errors="coerce")
+    if df["timestamp"].isna().any():
+        raise ValueError("Временные метки содержат пустые или некорректные значения")
+    if not df["timestamp"].is_monotonic_increasing or df["timestamp"].duplicated().any():
+        raise ValueError("Свечи должны идти строго по времени без повторов")
+    for column in ("open", "high", "low", "close"):
+        df[column] = pd.to_numeric(df[column], errors="coerce")
+    if df[["open", "high", "low", "close"]].isna().any().any():
+        raise ValueError("OHLC содержит пустые или нечисловые значения")
+    values = df[["open", "high", "low", "close"]]
+    if not all(math.isfinite(float(value)) for value in values.to_numpy().ravel()):
+        raise ValueError("OHLC содержит бесконечные или нечисловые значения")
+    if (values <= 0).any().any():
+        raise ValueError("Цены OHLC должны быть положительными")
+    if (df["high"] < df[["open", "close", "low"]].max(axis=1)).any():
+        raise ValueError("Некорректный максимум свечи")
+    if (df["low"] > df[["open", "close", "high"]].min(axis=1)).any():
+        raise ValueError("Некорректный минимум свечи")
+    return df
+
+def confirmed_structure(candles: pd.DataFrame, pivot_window: int = 5) -> pd.DataFrame:
+    """Размечает свинги и указывает индекс свечи, на которой экстремум подтверждён."""
+    if isinstance(pivot_window, bool) or not isinstance(pivot_window, int) or pivot_window < 1:
+        raise ValueError("pivot_window должен быть целым числом не меньше 1")
+    df = _validate_backtest_candles(candles)
     if len(df) < pivot_window * 2 + 1:
         return pd.DataFrame(columns=["pivot_index", "confirmed_index", "time", "price", "kind", "label"])
 
@@ -54,11 +80,12 @@ def backtest_hh_ll(candles: pd.DataFrame, pivot_window: int = 5,
     по close последней свечи. Комиссия и проскальзывание применяются на входе и выходе.
     Проценты задаются в обычных единицах: 0.1 означает 0.1%.
     """
-    df = candles.reset_index(drop=True).copy()
+    df = _validate_backtest_candles(candles)
     if len(df) < 3:
         raise ValueError("Для теста нужно минимум 3 свечи")
-    if fee_pct < 0 or slippage_pct < 0:
-        raise ValueError("Комиссия и проскальзывание не могут быть отрицательными")
+    if (not math.isfinite(float(fee_pct)) or not math.isfinite(float(slippage_pct))
+            or fee_pct < 0 or slippage_pct < 0 or fee_pct >= 100 or slippage_pct >= 100):
+        raise ValueError("Комиссия и проскальзывание должны быть конечными значениями от 0 до 100%")
     structure = confirmed_structure(df, pivot_window)
     signals = structure[structure.label.isin(["HH", "LL"])].sort_values(["confirmed_index", "pivot_index"])
     fee = fee_pct / 100
