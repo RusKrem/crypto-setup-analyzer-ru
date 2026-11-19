@@ -18,6 +18,25 @@ class SwingBacktestTests(unittest.TestCase):
         self.assertTrue((pivots.confirmed_index == pivots.pivot_index + 2).all())
         self.assertTrue(set(pivots.label).issubset({"HH", "LH", "HL", "LL"}))
 
+
+    def test_backtest_rejects_invalid_ohlc_and_chronology(self):
+        frame = self.candles()
+        invalid = frame.copy()
+        invalid.loc[3, "high"] = invalid.loc[3, "low"] - 1
+        with self.assertRaises(ValueError):
+            confirmed_structure(invalid, pivot_window=2)
+
+        unordered = frame.copy()
+        unordered.loc[4, "timestamp"] = unordered.loc[3, "timestamp"]
+        with self.assertRaises(ValueError):
+            backtest_hh_ll(unordered, pivot_window=2)
+
+    def test_backtest_rejects_non_finite_or_impossible_costs(self):
+        for fee, slippage in ((float("nan"), 0), (0, float("inf")), (100, 0), (0, 100)):
+            with self.assertRaises(ValueError):
+                backtest_hh_ll(self.candles(), pivot_window=2,
+                               fee_pct=fee, slippage_pct=slippage)
+
     def test_backtest_outputs_metrics_and_ignores_hl_lh_as_signals(self):
         trades, summary, structure = backtest_hh_ll(self.candles(), pivot_window=2, fee_pct=0, slippage_pct=0)
         self.assertIn("Сделок закрыто", summary)
