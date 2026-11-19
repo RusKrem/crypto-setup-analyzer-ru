@@ -287,6 +287,32 @@ class BridgeObserverIntegrationTests(unittest.TestCase):
             self.assertEqual(sender.call_count, 1)
 
 
+
+    def test_intent_write_failure_does_not_mark_unsent_item_unknown(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            queue = base / "telegram_queue"
+            queue.mkdir()
+            message = queue / "intent-write-failure.json"
+            message.write_text(json.dumps({"id": "intent-write-failure", "text": "test"}), encoding="utf-8")
+            real_save = bridge._save_queue_item
+            calls = []
+            def fail_first_save(path, item):
+                calls.append(1)
+                if len(calls) == 1:
+                    raise OSError("disk temporarily unavailable")
+                return real_save(path, item)
+            with patch.object(bridge, "QUEUE_DIR", str(queue)), \\
+                 patch.object(bridge, "LOG_FILE", str(base / "bridge.log")), \\
+                 patch.object(bridge, "_save_queue_item", side_effect=fail_first_save), \\
+                 patch.object(bridge.urllib.request, "urlopen") as sender:
+                bridge.process_file(str(message), "123:token", "@test_channel")
+                sender.assert_not_called()
+            saved = json.loads(message.read_text(encoding="utf-8"))
+            self.assertEqual(saved["delivery_state"], "pending")
+            self.assertEqual(saved["attempts"], 1)
+            self.assertFalse((queue / "failed" / "delivery_unknown").exists())
+
     def test_definite_dns_failure_remains_retryable_not_unknown(self):
         import socket
         from urllib.error import URLError
