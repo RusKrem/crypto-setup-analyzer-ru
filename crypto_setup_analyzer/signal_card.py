@@ -1,9 +1,9 @@
 """Фирменные графические карточки Reversal Lab для Telegram."""
 from __future__ import annotations
 
-import matplotlib
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt
+import threading
+from matplotlib.figure import Figure
+from matplotlib.backends.backend_agg import FigureCanvasAgg
 from matplotlib.patches import Rectangle, FancyBboxPatch, Circle
 from matplotlib.lines import Line2D
 from matplotlib.offsetbox import OffsetImage, AnnotationBbox
@@ -176,7 +176,7 @@ def _draw_chart(ax, signal, candles, kind):
                     annotation_clip=True)
 
 
-def render_signal_card(signal: dict, candles: list, kind: str, output_path: str) -> str:
+def _render_signal_card_unlocked(signal: dict, candles: list, kind: str, output_path: str) -> str:
     """Создаёт фирменную карточку Reversal Lab для приближения или подтверждения."""
     confirmed = str(kind).upper() == "CONFIRMED"
     candles = _validate_binance_candles(candles)
@@ -210,7 +210,8 @@ def render_signal_card(signal: dict, candles: list, kind: str, output_path: str)
     except (ValueError, TypeError, OSError):
         stamp = datetime.now(timezone.utc).strftime("%d.%m.%Y  %H:%M:%S UTC")
 
-    fig = plt.figure(figsize=(13.0, 9.8), facecolor=BG)
+    fig = Figure(figsize=(13.0, 9.8), facecolor=BG)
+    FigureCanvasAgg(fig)
     root = fig.add_axes([0, 0, 1, 1]); root.set_axis_off()
     _panel(root, (.012, .012), .976, .976, radius=.018, face="#07131f", edge=BORDER, lw=1.0)
     _panel(root, (.025, .895), .95, .085, radius=.014, face="#0c1c2b", edge="#29445c")
@@ -273,12 +274,12 @@ def render_signal_card(signal: dict, candles: list, kind: str, output_path: str)
         root.add_line(Line2D([x, x], [.23, .283], transform=root.transAxes,
                              color=BORDER, linewidth=.8))
 
-    # Recommendation block, with separate rows for recommendation and criteria.
+    # Event description and objective criteria. No trading recommendation is provided.
     _panel(root, (.025, .085), .95, .112, radius=.012, face="#0c1c2b", edge=BORDER)
-    root.text(.05, .168, "РЕКОМЕНДАЦИЯ", transform=root.transAxes,
+    root.text(.05, .168, "НАБЛЮДАЕМОЕ СОБЫТИЕ", transform=root.transAxes,
               color=GREEN if confirmed else GOLD, fontsize=10.5, weight="bold", va="center")
-    rec = (f"Рассматривайте возможный вход в {direction} после оценки риск-менеджмента."
-           if confirmed else f"Наблюдайте за реакцией цены. Возможный сценарий: {direction} после подтверждения.")
+    rec = (f"Закрытая свеча показала отвержение уровня. Направление наблюдаемой реакции: {direction}."
+           if confirmed else "Цена находится рядом с уровнем. Реакция пока не подтверждена.")
     root.text(.05, .139, rec, transform=root.transAxes, color=TEXT,
               fontsize=8.6, va="center")
     if confirmed:
@@ -301,5 +302,14 @@ def render_signal_card(signal: dict, candles: list, kind: str, output_path: str)
 
     Path(output_path).parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(output_path, dpi=160, facecolor=fig.get_facecolor())
-    plt.close(fig)
+    fig.clear()
     return output_path
+
+
+_RENDER_LOCK = threading.Lock()
+
+
+def render_signal_card(signal: dict, candles: list, kind: str, output_path: str) -> str:
+    """Serializes Matplotlib rendering to avoid cross-thread renderer races."""
+    with _RENDER_LOCK:
+        return _render_signal_card_unlocked(signal, candles, kind, output_path)
