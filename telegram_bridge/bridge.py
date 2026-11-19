@@ -183,6 +183,10 @@ def _validate_queue_item(item):
         raise ValueError("Поле delivery_state имеет неизвестное значение")
     if "telegram_sent" in item and not isinstance(item["telegram_sent"], bool):
         raise ValueError("Поле telegram_sent должно быть логическим")
+    if item.get("delivery_state") == "sent" and not item.get("telegram_sent", False):
+        raise ValueError("Состояние sent требует telegram_sent=true")
+    if "delivery_state" in item and item.get("telegram_sent") and item["delivery_state"] != "sent":
+        raise ValueError("telegram_sent=true несовместим с текущим delivery_state")
     if item.get("telegram_sent"):
         if not isinstance(item.get("telegram_result"), dict):
             raise ValueError("У доставленного события отсутствует telegram_result")
