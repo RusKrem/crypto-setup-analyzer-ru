@@ -440,6 +440,7 @@ class App:
             self.status.set("Загрузка FVG всех таймфреймов уже выполняется…")
             return
         symbol = self.loaded_symbol or self.symbol.get().strip().upper()
+        generation = self._data_generation
         days = int(self.days.get())
         intervals = ["1m", "3m", "5m", "15m", "30m", "1h", "2h", "4h", "1d"]
         self._mtf_loading = True
@@ -460,8 +461,8 @@ class App:
             def apply_result():
                 self._mtf_loading = False
                 active_symbol = self.loaded_symbol or self.symbol.get().strip().upper()
-                if active_symbol != symbol:
-                    self.status.set("Результаты FVG не применены: инструмент изменился во время загрузки.")
+                if generation != self._data_generation or active_symbol != symbol:
+                    self.status.set("Результаты FVG не применены: данные инструмента изменились во время загрузки.")
                     return
                 self.mtf_data = mtf_data
                 self.mtf_events = mtf_events
