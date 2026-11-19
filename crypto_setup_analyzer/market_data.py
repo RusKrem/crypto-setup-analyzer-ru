@@ -3,13 +3,14 @@ import time
 import requests
 import pandas as pd
 
-URL = "https://api.binance.com/api/v3/klines"
-EXCHANGE_INFO_URL = "https://api.binance.com/api/v3/exchangeInfo"
+URL = "https://fapi.binance.com/fapi/v1/klines"
+EXCHANGE_INFO_URL = "https://fapi.binance.com/fapi/v1/exchangeInfo"
+TICKER_PRICE_URL = "https://fapi.binance.com/fapi/v1/ticker/price"
 MS = {"1m":60000,"3m":180000,"5m":300000,"15m":900000,"30m":1800000,
       "1h":3600000,"2h":7200000,"4h":14400000,"1d":86400000}
 
 def available_usdt_symbols():
-    """Возвращает доступные на Binance Spot торговые пары с котируемым активом USDT."""
+    """Возвращает торгуемые бессрочные Binance USDⓈ-M USDT-контракты."""
     with requests.Session() as session:
         response = session.get(EXCHANGE_INFO_URL, timeout=20)
         response.raise_for_status()
@@ -18,16 +19,16 @@ def available_usdt_symbols():
         item["symbol"] for item in payload.get("symbols", [])
         if item.get("status") == "TRADING"
         and item.get("quoteAsset") == "USDT"
-        and item.get("isSpotTradingAllowed", True)
+        and item.get("contractType") == "PERPETUAL"
     ]
     return sorted(set(symbols))
 
 def realtime_price(symbol="NEARUSDT"):
-    """Fetch the latest publicly available Binance Spot trade price (REST polling)."""
+    """Fetch the latest Binance USDⓈ-M perpetual-contract price (REST polling)."""
     symbol = str(symbol).strip().upper()
     if not symbol or not symbol.isalnum():
         raise ValueError("Укажи корректный тикер, например NEARUSDT.")
-    url = "https://api.binance.com/api/v3/ticker/price"
+    url = TICKER_PRICE_URL
     with requests.Session() as session:
         response = session.get(url, params={"symbol": symbol}, timeout=5)
         response.raise_for_status()
@@ -82,7 +83,7 @@ def download(symbol="NEARUSDT", interval="1m", days=3):
 
 
 def latest_candles(symbol="NEARUSDT", interval="5m", limit=3):
-    """Fetch the most recent Binance Spot candles, including the currently forming candle."""
+    """Fetch the most recent Binance USDⓈ-M candles, including the currently forming candle."""
     if interval not in MS:
         raise ValueError("Неподдерживаемый таймфрейм.")
     symbol = str(symbol).strip().upper()
