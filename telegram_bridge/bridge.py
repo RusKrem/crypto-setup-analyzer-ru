@@ -447,6 +447,9 @@ def process_file(path, token, default_channel):
         if item.get("delivery_state") == "sending" and request_started:
             _mark_delivery_unknown(path, item, exc)
             return
+        if item.get("delivery_state") == "sending":
+            # Intent persistence failed before urlopen: the HTTP request never started.
+            item["delivery_state"] = "pending"
         attempts += 1
         delay = min(300, max(5, 2 ** min(attempts, 8)))
         item["attempts"] = attempts
