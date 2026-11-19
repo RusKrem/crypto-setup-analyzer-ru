@@ -11,10 +11,18 @@ if not exist "%PY%" (
     echo [SETUP] Creating dedicated bridge environment...
     py -3 -m venv "%VENV%"
     if errorlevel 1 (
-        echo [ERROR] Could not create Python environment. Install Python 3 and retry.
-        pause
-        exit /b 1
+        python -m venv "%VENV%"
+        if errorlevel 1 (
+            echo [ERROR] Could not create Python environment. Install Python 3 and retry.
+            pause
+            exit /b 1
+        )
     )
+)
+if not exist "%PY%" (
+    echo [ERROR] Bridge Python executable was not created.
+    pause
+    exit /b 1
 )
 if not exist "%EXE%" (
     echo [SETUP] Installing PyInstaller...
