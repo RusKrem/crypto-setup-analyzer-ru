@@ -1,5 +1,6 @@
 @echo off
 setlocal
 cd /d "%~dp0"
-if exist TelegramBridge.exe del /f /q TelegramBridge.exe
+echo [INFO] Rebuilding Telegram Bridge from the current source...
 call BUILD_TELEGRAM_BRIDGE.bat
+exit /b %ERRORLEVEL%
