@@ -286,6 +286,27 @@ class BridgeObserverIntegrationTests(unittest.TestCase):
             bridge.process_file(str(quarantined[0]), "123:token", "@test_channel")
             self.assertEqual(sender.call_count, 1)
 
+
+    def test_definite_dns_failure_remains_retryable_not_unknown(self):
+        import socket
+        from urllib.error import URLError
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            queue = base / "telegram_queue"
+            queue.mkdir()
+            message = queue / "dns-failure.json"
+            message.write_text(json.dumps({"id": "dns-failure-1", "text": "test"}), encoding="utf-8")
+            error = URLError(socket.gaierror("name resolution failed"))
+            with patch.object(bridge, "QUEUE_DIR", str(queue)), \\
+                 patch.object(bridge, "LOG_FILE", str(base / "bridge.log")), \\
+                 patch.object(bridge.urllib.request, "urlopen", side_effect=error):
+                bridge.process_file(str(message), "123:token", "@test_channel")
+            self.assertTrue(message.exists())
+            saved = json.loads(message.read_text(encoding="utf-8"))
+            self.assertEqual(saved["delivery_state"], "pending")
+            self.assertEqual(saved["attempts"], 1)
+            self.assertFalse((queue / "failed" / "delivery_unknown").exists())
+
     def test_restart_with_sending_state_is_quarantined(self):
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp)
