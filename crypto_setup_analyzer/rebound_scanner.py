@@ -502,6 +502,14 @@ class ReboundScanner:
             if (levels and levels_updated_at is not None
                     and now - levels_updated_at > self.levels_max_age_seconds):
                 levels = []
+                stale_keys = {key for key in self._active_alerts if key[0] == symbol}
+                self._active_alerts.difference_update(stale_keys)
+                self._confirmed_alerts.difference_update(stale_keys)
+                for key in stale_keys:
+                    self._approach_started.pop(key, None)
+                    self._last_confirmed_candle.pop(key, None)
+                if stale_keys:
+                    self._persist_state_locked()
         if not levels:
             return
         now = time.time()
@@ -638,7 +646,13 @@ class ReboundScanner:
             while not self._stop.is_set():
                 with self._lock:
                     symbols = list(self._symbols)
-                    levels_by_symbol = {k: list(v) for k, v in self._levels_cache.items()}
+                    now = time.time()
+                    levels_by_symbol = {
+                        symbol: list(levels)
+                        for symbol, levels in self._levels_cache.items()
+                        if levels and now - self._levels_cache_time.get(symbol, 0)
+                        <= self.levels_max_age_seconds
+                    }
                 for symbol in symbols:
                     if self._stop.is_set():
                         break
