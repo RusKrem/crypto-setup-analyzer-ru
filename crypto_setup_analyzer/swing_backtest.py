@@ -83,7 +83,12 @@ def backtest_hh_ll(candles: pd.DataFrame, pivot_window: int = 5,
     df = _validate_backtest_candles(candles)
     if len(df) < 3:
         raise ValueError("Для теста нужно минимум 3 свечи")
-    if (not math.isfinite(float(fee_pct)) or not math.isfinite(float(slippage_pct))
+    try:
+        fee_pct = float(fee_pct)
+        slippage_pct = float(slippage_pct)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError("Комиссия и проскальзывание должны быть числами") from exc
+    if (not math.isfinite(fee_pct) or not math.isfinite(slippage_pct)
             or fee_pct < 0 or slippage_pct < 0 or fee_pct >= 100 or slippage_pct >= 100):
         raise ValueError("Комиссия и проскальзывание должны быть конечными значениями от 0 до 100%")
     structure = confirmed_structure(df, pivot_window)
