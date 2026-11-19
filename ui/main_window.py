@@ -231,9 +231,10 @@ class App:
                             return
                         self.df = self.indicators.add_levels(combined)
                         # Индикаторы обновляются только после фактического изменения свечей.
-                        self.events = self.indicators.find_events(self.df)
-                        self.reaction_events = self.indicators.find_price_reactions(self.df)
-                        self.order_blocks = self.indicators.find_order_blocks(self.df)
+                        analysis_df = self._closed_candles(self.df, interval)
+                        self.events = self.indicators.find_events(analysis_df)
+                        self.reaction_events = self.indicators.find_price_reactions(analysis_df)
+                        self.order_blocks = self.indicators.find_order_blocks(analysis_df)
                         self.refresh(preserve_view=True)
                         last_time = new_last.strftime("%Y-%m-%d %H:%M:%S UTC")
                         self.status.set(f"Свечи обновлены: {symbol} {interval}. Последняя свеча: {last_time}.")
@@ -416,7 +417,7 @@ class App:
                 try:
                     candles = self.market_data.download_history(symbol, tf, days)
                     mtf_data[tf] = candles
-                    mtf_events[tf] = self.indicators.find_events(candles)
+                    mtf_events[tf] = self.indicators.find_events(self._closed_candles(candles, tf))
                 except Exception as exc:
                     failed.append(f"{tf}: {exc}")
 
@@ -449,12 +450,30 @@ class App:
         try:self.set_data(self.market_data.load_csv(path),f"Открыт файл {Path(path).name}.",symbol=Path(path).stem,interval="CSV")
         except Exception as e:messagebox.showerror("Ошибка CSV",str(e))
 
+    @staticmethod
+    def _closed_candles(candles, interval):
+        """Exclude the currently forming exchange candle from event calculations."""
+        durations = {
+            "1m": 60_000, "3m": 180_000, "5m": 300_000,
+            "15m": 900_000, "30m": 1_800_000, "1h": 3_600_000,
+            "2h": 7_200_000, "4h": 14_400_000, "1d": 86_400_000,
+        }
+        duration = durations.get(interval)
+        if duration is None or candles is None or len(candles) <= 1:
+            return candles.copy() if candles is not None else candles
+        last_open = pd.to_datetime(candles.timestamp.iloc[-1], utc=True)
+        if last_open + pd.Timedelta(milliseconds=duration) > pd.Timestamp.now(tz="UTC"):
+            return candles.iloc[:-1].copy().reset_index(drop=True)
+        return candles.copy().reset_index(drop=True)
+
     def set_data(self,df,msg,symbol=None,interval=None):
-        self.df=self.indicators.add_levels(df); self.events=self.indicators.find_events(self.df)
-        self.reaction_events=self.indicators.find_price_reactions(self.df)
-        self.order_blocks=self.indicators.find_order_blocks(self.df)
-        self.mtf_data={}; self.mtf_events={}
         self.loaded_interval=interval or self.interval.get()
+        self.df=self.indicators.add_levels(df)
+        analysis_df = self._closed_candles(self.df, self.loaded_interval)
+        self.events=self.indicators.find_events(analysis_df)
+        self.reaction_events=self.indicators.find_price_reactions(analysis_df)
+        self.order_blocks=self.indicators.find_order_blocks(analysis_df)
+        self.mtf_data={}; self.mtf_events={}
         self.loaded_symbol=symbol or self.symbol.get().strip().upper()
         self._last_live_price=None
         last_time=pd.to_datetime(self.df.timestamp.iloc[-1],utc=True).strftime("%Y-%m-%d %H:%M UTC")
